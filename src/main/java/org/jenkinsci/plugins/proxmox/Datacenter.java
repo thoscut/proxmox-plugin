@@ -2,8 +2,10 @@ package org.jenkinsci.plugins.proxmox;
 
 import hudson.Extension;
 import hudson.Util;
+import hudson.model.Computer;
 import hudson.model.Descriptor;
 import hudson.model.Label;
+import hudson.model.Node;
 import hudson.slaves.Cloud;
 import hudson.slaves.NodeProvisioner;
 import hudson.util.FormValidation;
@@ -13,6 +15,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.concurrent.Callable;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.security.auth.login.LoginException;
@@ -36,25 +39,96 @@ public class Datacenter extends Cloud {
     private final String realm;
     private final Secret password;
     private final Boolean ignoreSSL;
+    private final List<ProxmoxCloudSlaveTemplate> templates;
+    private final int instanceCap;
     private transient Connector pveConnector;
 
     @DataBoundConstructor
-    public Datacenter(String hostname, String username, String realm, Secret password, Boolean ignoreSSL) {
+    public Datacenter(String hostname, String username, String realm, Secret password, Boolean ignoreSSL, 
+                     List<ProxmoxCloudSlaveTemplate> templates, Integer instanceCap) {
         super("Datacenter(proxmox)");
         this.hostname = hostname;
         this.username = username;
         this.realm = realm;
         this.password = password;
         this.ignoreSSL = ignoreSSL;
+        this.templates = templates != null ? templates : new ArrayList<>();
+        this.instanceCap = instanceCap != null ? instanceCap : 0;
         this.pveConnector = null;
     }
 
+    // Legacy constructor for backward compatibility
+    public Datacenter(String hostname, String username, String realm, Secret password, Boolean ignoreSSL) {
+        this(hostname, username, realm, password, ignoreSSL, null, 0);
+    }
+
     public Collection<NodeProvisioner.PlannedNode> provision(Label label, int excessWorkload) {
-        return Collections.emptySet();
+        List<NodeProvisioner.PlannedNode> plannedNodes = new ArrayList<>();
+        
+        if (templates == null || templates.isEmpty()) {
+            return plannedNodes;
+        }
+        
+        // Find templates that can provision for this label
+        for (ProxmoxCloudSlaveTemplate template : templates) {
+            if (template.canProvision(label)) {
+                int currentSlaves = getCurrentSlaveCount();
+                int availableCapacity = Math.max(0, instanceCap - currentSlaves);
+                int toProvision = Math.min(excessWorkload, availableCapacity);
+                
+                if (toProvision > 0) {
+                    for (int i = 0; i < toProvision; i++) {
+                        plannedNodes.add(new NodeProvisioner.PlannedNode(
+                            template.getTemplateName() + "-" + System.currentTimeMillis(),
+                            Computer.threadPoolForRemoting.submit(new ProvisioningCallback(template)),
+                            Integer.parseInt(template.getNumExecutors())
+                        ));
+                    }
+                    excessWorkload -= toProvision;
+                    if (excessWorkload <= 0) break;
+                }
+            }
+        }
+        
+        return plannedNodes;
     }
 
     public boolean canProvision(Label label) {
+        if (templates == null || templates.isEmpty()) {
+            return false;
+        }
+        
+        for (ProxmoxCloudSlaveTemplate template : templates) {
+            if (template.canProvision(label)) {
+                return getCurrentSlaveCount() < instanceCap;
+            }
+        }
         return false;
+    }
+
+    private class ProvisioningCallback implements Callable<Node> {
+        private final ProxmoxCloudSlaveTemplate template;
+
+        ProvisioningCallback(ProxmoxCloudSlaveTemplate template) {
+            this.template = template;
+        }
+
+        public Node call() throws Exception {
+            return template.provision(Datacenter.this);
+        }
+    }
+
+    private int getCurrentSlaveCount() {
+        int count = 0;
+        for (hudson.model.Node node : Jenkins.get().getNodes()) {
+            if (node instanceof VirtualMachineSlave) {
+                VirtualMachineSlave vmSlave = (VirtualMachineSlave) node;
+                if (getDatacenterDescription().equals(vmSlave.getDatacenterDescription())) {
+                    count++;
+                }
+            }
+        }
+        return count;
     }
 
     public String getHostname() {
@@ -75,6 +149,14 @@ public class Datacenter extends Cloud {
 
     public Boolean getIgnoreSSL() {
         return ignoreSSL;
+    }
+
+    public List<ProxmoxCloudSlaveTemplate> getTemplates() {
+        return templates != null ? templates : new ArrayList<>();
+    }
+
+    public int getInstanceCap() {
+        return instanceCap;
     }
 
     public String getDatacenterDescription() {
@@ -195,6 +277,21 @@ public class Datacenter extends Cloud {
                 LOGGER.log(Level.SEVERE, "Authentication error", e);
                 return FormValidation.error(
                         "Authentication error. Please verify your login credentials or check logs.");
+            } catch (Exception e) {
+                LOGGER.log(Level.SEVERE, "Connection error", e);
+                
+                // Check for SSL certificate errors in the exception chain
+                Throwable cause = e;
+                while (cause != null) {
+                    if (cause instanceof javax.net.ssl.SSLHandshakeException) {
+                        return FormValidation.error(
+                                "SSL certificate validation failed. Either add the certificate to your truststore or enable 'Ignore SSL certificates' option.");
+                    }
+                    cause = cause.getCause();
+                }
+                
+                return FormValidation.error(
+                        "Connection error: " + e.getMessage() + ". Please verify your hostname, SSL settings, or check logs.");
             }
         }
     }

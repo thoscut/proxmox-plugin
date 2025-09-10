@@ -80,6 +80,7 @@ class ConfigurationAsCodeTest {
                 "datacenter:",
                 "  hostname: \"company-proxmox\"",
                 "  ignoreSSL: true",
+                "  instanceCap: 0",
                 "  password: \"" + password.getEncryptedValue() + "\"",
                 "  realm: \"pve\"",
                 "  username: \"proxmox-user\"",

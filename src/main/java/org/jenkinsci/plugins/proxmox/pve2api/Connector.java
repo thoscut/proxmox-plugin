@@ -193,6 +193,13 @@ public class Connector {
                 .getString("data");
     }
 
+    public String cloneQemuMachine(String node, Integer vmid, Integer newid, String name) throws LoginException {
+        String body = "newid=" + newid + "&name=" + name;
+        return postJSONResource("nodes/" + node + "/qemu/" + vmid.toString() + "/clone", body)
+                .getObject()
+                .getString("data");
+    }
+
     protected void finalize() {
         unirest.shutDown();
     }
