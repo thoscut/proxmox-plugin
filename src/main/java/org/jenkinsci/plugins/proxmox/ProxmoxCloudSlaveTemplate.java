@@ -23,11 +23,13 @@ import java.util.logging.Logger;
 
 import javax.security.auth.login.LoginException;
 import jenkins.model.Jenkins;
+import kong.unirest.json.JSONObject;
 
 import org.jenkinsci.plugins.proxmox.pve2api.Connector;
 import org.jenkinsci.plugins.proxmox.VirtualMachineLauncher.RevertPolicy;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.QueryParameter;
+import org.kohsuke.stapler.verb.POST;
 
 public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCloudSlaveTemplate> {
 
@@ -309,6 +311,55 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
                 return FormValidation.ok();
             } catch (NumberFormatException e) {
                 return FormValidation.error("Max idle minutes must be a valid integer");
+            }
+        }
+
+        @POST  
+        public FormValidation doCheckTemplateVMStatus(
+                @QueryParameter String datacenterNode,
+                @QueryParameter String templateVmId) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+            
+            if (datacenterNode == null || datacenterNode.isEmpty()) {
+                return FormValidation.error("Please select a datacenter node");
+            }
+            if (templateVmId == null || templateVmId.isEmpty()) {
+                return FormValidation.error("Please select a template VM ID");
+            }
+            
+            try {
+                Integer vmId = Integer.parseInt(templateVmId);
+                for (Cloud cloud : Jenkins.get().clouds) {
+                    if (cloud instanceof Datacenter) {
+                        Datacenter datacenter = (Datacenter) cloud;
+                        Connector pveApi = datacenter.proxmoxInstance();
+                        
+                        boolean isRunning = pveApi.isQemuMachineRunning(datacenterNode, vmId);
+                        JSONObject status = pveApi.getQemuMachineStatus(datacenterNode, vmId);
+                        String vmStatus = status.getString("status");
+                        String uptime = status.optString("uptime", "N/A");
+                        
+                        StringBuilder statusMessage = new StringBuilder();
+                        statusMessage.append("Template VM ").append(vmId).append(" Status: ").append(vmStatus);
+                        if (isRunning) {
+                            statusMessage.append(" (Running)");
+                            if (!uptime.equals("N/A")) {
+                                statusMessage.append(", Uptime: ").append(uptime).append("s");
+                            }
+                        } else {
+                            statusMessage.append(" (Stopped)");
+                        }
+                        
+                        return FormValidation.ok(statusMessage.toString());
+                    }
+                }
+                return FormValidation.error("No Proxmox datacenter found");
+            } catch (NumberFormatException e) {
+                return FormValidation.error("Invalid VM ID format");
+            } catch (LoginException e) {
+                return FormValidation.error("Login Failed: " + e.getMessage());
+            } catch (Exception e) {
+                return FormValidation.error("Status Check Failed: " + e.getMessage());
             }
         }
     }

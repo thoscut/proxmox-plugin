@@ -46,7 +46,7 @@ public class Datacenter extends Cloud {
     @DataBoundConstructor
     public Datacenter(String hostname, String username, String realm, Secret password, Boolean ignoreSSL, 
                      List<ProxmoxCloudSlaveTemplate> templates, Integer instanceCap) {
-        super("Datacenter(proxmox)");
+        super(hostname != null && !hostname.isEmpty() ? "Proxmox-" + hostname : "Proxmox-Datacenter");
         this.hostname = hostname;
         this.username = username;
         this.realm = realm;

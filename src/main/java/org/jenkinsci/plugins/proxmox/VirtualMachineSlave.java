@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import javax.security.auth.login.LoginException;
 import jenkins.model.Jenkins;
+import kong.unirest.json.JSONObject;
 import org.jenkinsci.plugins.proxmox.VirtualMachineLauncher.RevertPolicy;
 import org.jenkinsci.plugins.proxmox.pve2api.Connector;
 import org.kohsuke.stapler.DataBoundConstructor;
@@ -120,6 +121,11 @@ public class VirtualMachineSlave extends Slave {
         // TODO: Not sure if this is needed, could be able to use this to reset to snapshots
         // TODO: as a computer is required for a job.
         return new VirtualMachineSlaveComputer(this);
+    }
+
+    @Override
+    public DescriptorImpl getDescriptor() {
+        return (DescriptorImpl) super.getDescriptor();
     }
 
     @Extension
@@ -245,6 +251,99 @@ public class VirtualMachineSlave extends Slave {
                 return FormValidation.ok("Returned: " + taskStatus);
             } catch (LoginException e) {
                 return FormValidation.error("Login Failed: " + e.getMessage());
+            }
+        }
+
+        @POST
+        public FormValidation doStartVM(
+                @QueryParameter String datacenterDescription,
+                @QueryParameter String datacenterNode,
+                @QueryParameter Integer virtualMachineId) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+            Datacenter datacenter = getDatacenterByDescription(datacenterDescription);
+            if (datacenter == null) return FormValidation.error("Datacenter not found!");
+            Connector pveApi = datacenter.proxmoxInstance();
+            try {
+                boolean isRunning = pveApi.isQemuMachineRunning(datacenterNode, virtualMachineId);
+                if (isRunning) {
+                    return FormValidation.warning("VM " + virtualMachineId + " is already running");
+                }
+                String taskId = pveApi.startQemuMachine(datacenterNode, virtualMachineId);
+                return FormValidation.ok("Start task initiated with ID: " + taskId);
+            } catch (LoginException e) {
+                return FormValidation.error("Login Failed: " + e.getMessage());
+            } catch (Exception e) {
+                return FormValidation.error("Start VM Failed: " + e.getMessage());
+            }
+        }
+
+        @POST
+        public FormValidation doStopVM(
+                @QueryParameter String datacenterDescription,
+                @QueryParameter String datacenterNode,
+                @QueryParameter Integer virtualMachineId) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+            Datacenter datacenter = getDatacenterByDescription(datacenterDescription);
+            if (datacenter == null) return FormValidation.error("Datacenter not found!");
+            Connector pveApi = datacenter.proxmoxInstance();
+            try {
+                boolean isRunning = pveApi.isQemuMachineRunning(datacenterNode, virtualMachineId);
+                if (!isRunning) {
+                    return FormValidation.warning("VM " + virtualMachineId + " is already stopped");
+                }
+                String taskId = pveApi.stopQemuMachine(datacenterNode, virtualMachineId);
+                return FormValidation.ok("Stop task initiated with ID: " + taskId);
+            } catch (LoginException e) {
+                return FormValidation.error("Login Failed: " + e.getMessage());
+            } catch (Exception e) {
+                return FormValidation.error("Stop VM Failed: " + e.getMessage());
+            }
+        }
+
+        @POST
+        public FormValidation doCheckVMStatus(
+                @QueryParameter String datacenterDescription,
+                @QueryParameter String datacenterNode,
+                @QueryParameter Integer virtualMachineId) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+            Datacenter datacenter = getDatacenterByDescription(datacenterDescription);
+            if (datacenter == null) return FormValidation.error("Datacenter not found!");
+            Connector pveApi = datacenter.proxmoxInstance();
+            try {
+                boolean isRunning = pveApi.isQemuMachineRunning(datacenterNode, virtualMachineId);
+                JSONObject status = pveApi.getQemuMachineStatus(datacenterNode, virtualMachineId);
+                String vmStatus = status.getString("status");
+                String uptime = status.optString("uptime", "N/A");
+                String cpu = status.optString("cpu", "N/A");
+                String mem = status.optString("mem", "N/A");
+                String maxmem = status.optString("maxmem", "N/A");
+                
+                StringBuilder statusMessage = new StringBuilder();
+                statusMessage.append("VM ").append(virtualMachineId).append(" Status: ").append(vmStatus);
+                if (isRunning) {
+                    statusMessage.append(" (Running)");
+                    if (!uptime.equals("N/A")) {
+                        statusMessage.append(", Uptime: ").append(uptime).append("s");
+                    }
+                    if (!cpu.equals("N/A")) {
+                        statusMessage.append(", CPU: ").append(String.format("%.2f%%", Double.parseDouble(cpu) * 100));
+                    }
+                    if (!mem.equals("N/A") && !maxmem.equals("N/A")) {
+                        long memBytes = Long.parseLong(mem);
+                        long maxmemBytes = Long.parseLong(maxmem);
+                        double memUsage = (double) memBytes / maxmemBytes * 100;
+                        statusMessage.append(", Memory: ").append(String.format("%.1f%% (%d MB / %d MB)", 
+                            memUsage, memBytes / (1024 * 1024), maxmemBytes / (1024 * 1024)));
+                    }
+                } else {
+                    statusMessage.append(" (Stopped)");
+                }
+                
+                return FormValidation.ok(statusMessage.toString());
+            } catch (LoginException e) {
+                return FormValidation.error("Login Failed: " + e.getMessage());
+            } catch (Exception e) {
+                return FormValidation.error("Status Check Failed: " + e.getMessage());
             }
         }
 
