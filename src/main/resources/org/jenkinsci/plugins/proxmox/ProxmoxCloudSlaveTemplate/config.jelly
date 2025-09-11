@@ -61,6 +61,7 @@
                                selected="${it.launcher.descriptor==descriptor}"
                                title="${descriptor.displayName}">
                 <j:set var="instance" value="${it.launcher.descriptor==descriptor ? it.launcher : null}"/>
+                <f:class-entry descriptor="${descriptor}" />
                 <st:include from="${descriptor}" page="${descriptor.configPage}" optional="true"/>
             </f:dropdownListBlock>
         </j:forEach>
@@ -73,6 +74,7 @@
                                selected="${it.retentionStrategy.descriptor==descriptor}"
                                title="${descriptor.displayName}">
                 <j:set var="instance" value="${it.retentionStrategy.descriptor==descriptor ? it.retentionStrategy : null}"/>
+                <f:class-entry descriptor="${descriptor}" />
                 <st:include from="${descriptor}" page="${descriptor.configPage}" optional="true"/>
             </f:dropdownListBlock>
         </j:forEach>

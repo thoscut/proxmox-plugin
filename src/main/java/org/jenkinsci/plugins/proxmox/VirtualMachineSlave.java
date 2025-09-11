@@ -25,7 +25,6 @@ import org.jenkinsci.plugins.proxmox.pve2api.Connector;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.verb.POST;
-import org.jenkinsci.Symbol;
 
 public class VirtualMachineSlave extends Slave {
 
@@ -130,7 +129,6 @@ public class VirtualMachineSlave extends Slave {
     }
 
     @Extension
-    @Symbol("virtualMachineSlave")
     public static final class DescriptorImpl extends SlaveDescriptor {
 
         private String datacenterDescription;

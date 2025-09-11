@@ -26,7 +26,6 @@ import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.StaplerRequest2;
 import org.kohsuke.stapler.verb.POST;
-import org.jenkinsci.Symbol;
 
 /**
  * Represents a Proxmox datacenter.
@@ -212,10 +211,15 @@ public class Datacenter extends Cloud {
     }
 
     @Extension
-    @Symbol("datacenter")
     public static final class DescriptorImpl extends Descriptor<Cloud> {
+        
+        @Override
         public String getDisplayName() {
             return "Proxmox Datacenter";
+        }
+        
+        public boolean isInstantiable() {
+            return true;
         }
 
         @Override
