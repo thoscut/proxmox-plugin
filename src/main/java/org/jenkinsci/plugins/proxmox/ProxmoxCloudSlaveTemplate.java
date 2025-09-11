@@ -46,7 +46,6 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
     private final int maxIdleMinutes;
     private final boolean startVM;
     private final int startupWaitingPeriodSeconds;
-    private final RevertPolicy revertPolicy;
     private final ComputerLauncher launcher;
     private final RetentionStrategy<?> retentionStrategy;
     private final List<? extends NodeProperty<?>> nodeProperties;
@@ -66,7 +65,6 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
                                    int maxIdleMinutes,
                                    boolean startVM,
                                    int startupWaitingPeriodSeconds,
-                                   RevertPolicy revertPolicy,
                                    ComputerLauncher launcher,
                                    RetentionStrategy<?> retentionStrategy,
                                    List<? extends NodeProperty<?>> nodeProperties) {
@@ -81,7 +79,6 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
         this.maxIdleMinutes = maxIdleMinutes;
         this.startVM = startVM;
         this.startupWaitingPeriodSeconds = startupWaitingPeriodSeconds;
-        this.revertPolicy = revertPolicy;
         this.launcher = launcher;
         this.retentionStrategy = retentionStrategy;
         this.nodeProperties = nodeProperties;
@@ -130,7 +127,7 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
                 snapshotName,
                 startVM,
                 startupWaitingPeriodSeconds,
-                revertPolicy
+                RevertPolicy.NEVER
             );
 
             return slave;
@@ -216,7 +213,6 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
     public int getMaxIdleMinutes() { return maxIdleMinutes; }
     public boolean getStartVM() { return startVM; }
     public int getStartupWaitingPeriodSeconds() { return startupWaitingPeriodSeconds; }
-    public RevertPolicy getRevertPolicy() { return revertPolicy; }
     public ComputerLauncher getLauncher() { return launcher; }
     public RetentionStrategy<?> getRetentionStrategy() { return retentionStrategy; }
     public List<? extends NodeProperty<?>> getNodeProperties() { return nodeProperties; }
@@ -361,6 +357,10 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
             } catch (Exception e) {
                 return FormValidation.error("Status Check Failed: " + e.getMessage());
             }
+        }
+        
+        public List<Descriptor<RetentionStrategy<?>>> getRetentionStrategyDescriptors() {
+            return Jenkins.get().getDescriptorList(RetentionStrategy.class);
         }
     }
 }

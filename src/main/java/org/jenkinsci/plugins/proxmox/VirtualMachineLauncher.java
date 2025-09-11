@@ -38,6 +38,7 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
     private final int waitingTimeSecs;
 
     public static enum RevertPolicy {
+        NEVER("Never revert"),
         AFTER_CONNECT("After connect to the virtual machine"),
         BEFORE_JOB("Before every job executing on the virtual machine"),
         AFTER_JOB("After every job executing on the virtual machine");
@@ -215,7 +216,7 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
             throws IOException, InterruptedException {
         if (revertPolicy == RevertPolicy.AFTER_CONNECT) {
             revertSnapshot(slaveComputer, taskListener);
-        } else {
+        } else if (revertPolicy != RevertPolicy.NEVER) {
             if (startVM) {
                 startSlaveIfNeeded(taskListener);
             }
