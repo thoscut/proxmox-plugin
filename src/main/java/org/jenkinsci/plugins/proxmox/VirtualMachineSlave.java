@@ -25,6 +25,7 @@ import org.jenkinsci.plugins.proxmox.pve2api.Connector;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.verb.POST;
+import org.jenkinsci.Symbol;
 
 public class VirtualMachineSlave extends Slave {
 
@@ -129,6 +130,7 @@ public class VirtualMachineSlave extends Slave {
     }
 
     @Extension
+    @Symbol("virtualMachineSlave")
     public static final class DescriptorImpl extends SlaveDescriptor {
 
         private String datacenterDescription;
@@ -152,6 +154,7 @@ public class VirtualMachineSlave extends Slave {
         }
 
         public ListBoxModel doFillDatacenterDescriptionItems() {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             ListBoxModel items = new ListBoxModel();
             items.add("[Select]", "");
             for (Cloud cloud : Jenkins.get().clouds) {
@@ -170,11 +173,16 @@ public class VirtualMachineSlave extends Slave {
             Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             ListBoxModel items = new ListBoxModel();
             items.add("[Select]", "");
-            Datacenter datacenter = getDatacenterByDescription(datacenterDescription);
-            if (datacenter != null) {
-                for (String node : datacenter.getNodes()) {
-                    items.add(node);
+            try {
+                Datacenter datacenter = getDatacenterByDescription(datacenterDescription);
+                if (datacenter != null) {
+                    for (String node : datacenter.getNodes()) {
+                        items.add(node);
+                    }
                 }
+            } catch (Exception e) {
+                // If there's any error (connection, parsing, etc.), just return empty list
+                // The user will see "[Select]" option only
             }
             return items;
         }
@@ -185,12 +193,17 @@ public class VirtualMachineSlave extends Slave {
             Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             ListBoxModel items = new ListBoxModel();
             items.add("[Select]", "");
-            Datacenter datacenter = getDatacenterByDescription(datacenterDescription);
-            if (datacenter != null) {
-                HashMap<String, Integer> machines = datacenter.getQemuMachines(datacenterNode);
-                for (Map.Entry<String, Integer> me : machines.entrySet()) {
-                    items.add(me.getKey().toString(), me.getValue().toString());
+            try {
+                Datacenter datacenter = getDatacenterByDescription(datacenterDescription);
+                if (datacenter != null) {
+                    HashMap<String, Integer> machines = datacenter.getQemuMachines(datacenterNode);
+                    for (Map.Entry<String, Integer> me : machines.entrySet()) {
+                        items.add(me.getKey().toString(), me.getValue().toString());
+                    }
                 }
+            } catch (Exception e) {
+                // If there's any error (connection, parsing, etc.), just return empty list
+                // The user will see "[Select]" option only
             }
             return items;
         }
@@ -202,12 +215,17 @@ public class VirtualMachineSlave extends Slave {
             Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             ListBoxModel items = new ListBoxModel();
             items.add("[Select]", "");
-            Datacenter datacenter = getDatacenterByDescription(datacenterDescription);
-            if (datacenter != null && virtualMachineId != null && virtualMachineId.length() != 0) {
-                for (String snapshot :
-                        datacenter.getQemuMachineSnapshots(datacenterNode, Integer.parseInt(virtualMachineId))) {
-                    items.add(snapshot);
+            try {
+                Datacenter datacenter = getDatacenterByDescription(datacenterDescription);
+                if (datacenter != null && virtualMachineId != null && virtualMachineId.length() != 0) {
+                    Integer vmId = Integer.parseInt(virtualMachineId);
+                    for (String snapshot : datacenter.getQemuMachineSnapshots(datacenterNode, vmId)) {
+                        items.add(snapshot);
+                    }
                 }
+            } catch (Exception e) {
+                // If there's any error (parsing, connection, etc.), just return empty list
+                // The user will see "[Select]" option only
             }
             return items;
         }
