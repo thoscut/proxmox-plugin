@@ -82,6 +82,7 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
      * @throws ObjectStreamException if something went wrong.
      */
     private Object readResolve() throws ObjectStreamException {
+        // Handle migration from old instances with delegate field
         if (delegate != null) {
             return new VirtualMachineLauncher(
                     delegate,
@@ -93,6 +94,10 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
                     WAIT_TIME_MS / 1000,
                     revertPolicy);
         }
+        
+        // Note: Jenkins warning about not calling super.readResolve(), but DelegatingComputerLauncher
+        // does not have a readResolve() method. This implementation handles backward compatibility
+        // for instances with the deprecated delegate field.
         return this;
     }
 

@@ -27,6 +27,18 @@ public class VirtualMachineSlaveComputer extends SlaveComputer {
             return;
         }
 
+        // Don't try to reconnect if the node is permanently disabled
+        if (!isAcceptingTasks()) {
+            getListener().getLogger().println("INFO: Node is disabled, skipping reconnection attempt");
+            return;
+        }
+        
+        // Don't try to reconnect if manually taken offline (not temporarily offline)
+        if (isOffline() && !isTemporarilyOffline()) {
+            getListener().getLogger().println("INFO: Node is manually offline, skipping reconnection attempt");
+            return;
+        }
+
         super.tryReconnect();
     }
 

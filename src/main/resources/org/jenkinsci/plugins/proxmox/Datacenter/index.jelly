@@ -1,0 +1,114 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:d="jelly:define" xmlns:l="/lib/layout" xmlns:t="/lib/hudson" xmlns:f="/lib/form">
+
+  <l:layout title="Proxmox Cloud: ${it.datacenterDescription}" permission="${app.READ}">
+    <l:side-panel>
+      <l:tasks>
+        <l:task icon="icon-notepad icon-md" href="./" title="Status" />
+        <l:task icon="icon-gear icon-md" href="configure" title="Configure" permission="${app.ADMINISTER}" />
+        <l:task icon="icon-edit-delete icon-md" href="doDelete" title="Delete Cloud" permission="${app.ADMINISTER}" post="true" requiresConfirmation="true" />
+        <j:if test="${app.hasPermission(app.ADMINISTER)}">
+          <l:task icon="icon-clipboard icon-md" href="status" title="Extended Status" permission="${app.ADMINISTER}" />
+        </j:if>
+      </l:tasks>
+    </l:side-panel>
+    <l:main-panel>
+      <h1>Proxmox Cloud Status</h1>
+      
+      <h2>${it.datacenterDescription}</h2>
+      
+      <table class="pane bigtable">
+        <tr>
+          <th>Property</th>
+          <th>Value</th>
+        </tr>
+        <tr>
+          <td>Hostname:</td>
+          <td>${it.hostname}</td>
+        </tr>
+        <tr>
+          <td>Instance Cap:</td>
+          <td>${it.instanceCap}</td>
+        </tr>
+        <tr>
+          <td>Active Templates:</td>
+          <td>${it.templates.size()}</td>
+        </tr>
+        <tr>
+          <td>Connection Status:</td>
+          <td>
+            <j:set var="nodes" value="${it.nodes}"/>
+            <j:choose>
+              <j:when test="${!nodes.isEmpty()}">
+                <span style="color: green;">✓ Connected (${nodes.size()} nodes)</span>
+              </j:when>
+              <j:otherwise>
+                <span style="color: red;">✗ Connection Failed</span>
+              </j:otherwise>
+            </j:choose>
+          </td>
+        </tr>
+      </table>
+
+      <j:if test="${!it.templates.isEmpty()}">
+        <h3>Cloud Templates</h3>
+        <table class="pane bigtable">
+          <tr>
+            <th>Description</th>
+            <th>Template VM</th>
+            <th>Node</th>
+            <th>Capacity</th>
+            <th>Type</th>
+          </tr>
+          <j:forEach var="template" items="${it.templates}">
+            <tr>
+              <td>${template.templateDescription}</td>
+              <td>${template.templateVmId}</td>
+              <td>${template.datacenterNode}</td>
+              <td>${template.instanceCap}</td>
+              <td>${template.linkedClone ? 'Linked Clone' : 'Full Clone'}</td>
+            </tr>
+          </j:forEach>
+        </table>
+      </j:if>
+
+      <j:set var="stats" value="${it.statistics}"/>
+      <h3>Current Statistics</h3>
+      <table class="pane bigtable">
+        <tr>
+          <td>Current Slaves:</td>
+          <td>${stats.currentSlaveCount}</td>
+        </tr>
+        <tr>
+          <td>Provisioning Success Rate:</td>
+          <td>
+            <j:choose>
+              <j:when test="${stats.totalProvisioningAttempts > 0}">
+                ${stats.successRate}% (${stats.successfulProvisionings}/${stats.totalProvisioningAttempts})
+              </j:when>
+              <j:otherwise>No provisioning attempts yet</j:otherwise>
+            </j:choose>
+          </td>
+        </tr>
+        <tr>
+          <td>Datacenter Reachable:</td>
+          <td>
+            <j:choose>
+              <j:when test="${stats.datacenterReachable}">
+                <span style="color: green;">Yes</span>
+              </j:when>
+              <j:otherwise>
+                <span style="color: red;">No</span>
+              </j:otherwise>
+            </j:choose>
+          </td>
+        </tr>
+      </table>
+
+      <p style="margin-top: 20px;">
+        <a href="status">View Extended Status and Detailed Statistics »</a>
+      </p>
+
+    </l:main-panel>
+  </l:layout>
+</j:jelly>

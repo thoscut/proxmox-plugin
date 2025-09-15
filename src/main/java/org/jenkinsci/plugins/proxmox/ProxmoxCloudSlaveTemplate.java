@@ -16,6 +16,7 @@ import hudson.util.ListBoxModel;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
@@ -45,6 +46,7 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
     private final int instanceCap;
     private final int maxIdleMinutes;
     private final boolean startVM;
+    private final boolean linkedClone;
     private final int startupWaitingPeriodSeconds;
     private final ComputerLauncher launcher;
     private final RetentionStrategy<?> retentionStrategy;
@@ -64,6 +66,7 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
                                    int instanceCap,
                                    int maxIdleMinutes,
                                    boolean startVM,
+                                   boolean linkedClone,
                                    int startupWaitingPeriodSeconds,
                                    ComputerLauncher launcher,
                                    RetentionStrategy<?> retentionStrategy,
@@ -78,6 +81,7 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
         this.instanceCap = instanceCap;
         this.maxIdleMinutes = maxIdleMinutes;
         this.startVM = startVM;
+        this.linkedClone = linkedClone;
         this.startupWaitingPeriodSeconds = startupWaitingPeriodSeconds;
         this.launcher = launcher;
         this.retentionStrategy = retentionStrategy;
@@ -96,19 +100,35 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
     }
 
     public VirtualMachineSlave provision(Datacenter datacenter) throws Exception {
-        if (getCurrentSlaveCount() >= getInstanceCap()) {
-            throw new IllegalStateException("Instance cap reached for template: " + templateName);
-        }
+        // For backward compatibility - generate a name if not provided
+        return provision(datacenter, null);
+    }
 
+    public VirtualMachineSlave provision(Datacenter datacenter, String plannedNodeName) throws Exception {
+        int currentCount = getCurrentSlaveCount();
+        int instanceCap = getInstanceCap();
+        if (currentCount >= instanceCap) {
+            LOGGER.log(Level.WARNING, "Instance cap reached for template {0}: {1}/{2} slaves running", 
+                      new Object[]{templateName, currentCount, instanceCap});
+            throw new IllegalStateException("Instance cap reached for template: " + templateName + 
+                                          " (" + currentCount + "/" + instanceCap + " slaves running)");
+        }
+        
+        LOGGER.log(Level.INFO, "Provisioning new slave for template {0}: {1}/{2} slaves currently running", 
+                  new Object[]{templateName, currentCount, instanceCap});
+
+        if (currentlyProvisioning == null) {
+            currentlyProvisioning = new AtomicInteger(0);
+        }
         currentlyProvisioning.incrementAndGet();
         try {
-            String cloneName = generateCloneName();
-            
             Connector proxmoxApi = datacenter.proxmoxInstance();
+            // Use the planned node name if provided, otherwise generate one
+            String cloneName = (plannedNodeName != null) ? plannedNodeName : generateCloneName(proxmoxApi);
             Integer clonedVmId = cloneVmFromTemplate(proxmoxApi, cloneName);
             
             if (startVM) {
-                startClonedVm(proxmoxApi, clonedVmId);
+                startClonedVm(proxmoxApi, clonedVmId, cloneName);
             }
 
             VirtualMachineSlave slave = new VirtualMachineSlave(
@@ -132,27 +152,129 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
 
             return slave;
         } finally {
-            currentlyProvisioning.decrementAndGet();
+            if (currentlyProvisioning != null) {
+                currentlyProvisioning.decrementAndGet();
+            }
         }
     }
 
-    private String generateCloneName() {
-        return templateName + "-" + System.currentTimeMillis();
+    private String generateCloneName(Connector proxmoxApi) throws LoginException {
+        // Get the actual template VM name from Proxmox using the template VM ID
+        HashMap<String, Integer> machines = proxmoxApi.getQemuMachines(datacenterNode);
+        Integer templateVmIdInt = Integer.parseInt(templateVmId);
+        
+        String actualTemplateName = null;
+        for (Map.Entry<String, Integer> entry : machines.entrySet()) {
+            if (entry.getValue().equals(templateVmIdInt)) {
+                actualTemplateName = entry.getKey();
+                break;
+            }
+        }
+        
+        // Fallback to configured template name if not found
+        if (actualTemplateName == null) {
+            LOGGER.log(Level.WARNING, "Could not find template VM with ID {0}, using configured template name: {1}", 
+                      new Object[]{templateVmId, templateName});
+            actualTemplateName = templateName;
+        }
+        
+        return actualTemplateName + "-" + System.currentTimeMillis();
     }
 
     private Integer cloneVmFromTemplate(Connector proxmoxApi, String cloneName) throws LoginException {
         Integer templateVmIdInt = Integer.parseInt(templateVmId);
         
+        // Get template name for better logging
+        HashMap<String, Integer> machines = proxmoxApi.getQemuMachines(datacenterNode);
+        String templateVmName = null;
+        for (Map.Entry<String, Integer> entry : machines.entrySet()) {
+            if (entry.getValue().equals(templateVmIdInt)) {
+                templateVmName = entry.getKey();
+                break;
+            }
+        }
+        // Fallback if template name not found
+        if (templateVmName == null) {
+            templateVmName = "VM-" + templateVmIdInt;
+        }
+        
+        // Check if template VM is running - cloning running VMs can cause issues
+        boolean templateIsRunning = proxmoxApi.isQemuMachineRunning(datacenterNode, templateVmIdInt);
+        if (templateIsRunning) {
+            String errorMessage = "Cannot clone from running template VM " + templateVmName + " (ID: " + templateVmIdInt + 
+                                  "). Template VM must be stopped before cloning to avoid data corruption and ensure consistent clones.";
+            LOGGER.log(Level.SEVERE, errorMessage);
+            throw new IllegalStateException(errorMessage);
+        }
+        
+        LOGGER.log(Level.FINE, "Template VM {0} (ID: {1}) is stopped, proceeding with clone operation", 
+                  new Object[]{templateVmName, templateVmIdInt});
+        
+        // Determine the actual snapshot parameter to use
+        String actualSnapshotParam = null;
+        if (snapshotName != null && !snapshotName.isEmpty()) {
+            if ("current".equals(snapshotName)) {
+                // For "current", check if VM has any snapshots at all
+                List<String> availableSnapshots = proxmoxApi.getQemuMachineSnapshots(datacenterNode, templateVmIdInt);
+                if (availableSnapshots.isEmpty()) {
+                    // No snapshots exist, clone current state without snapshot parameter
+                    actualSnapshotParam = null;
+                    LOGGER.log(Level.FINE, "Template VM {0} (ID: {1}) has no snapshots, cloning current state directly", 
+                              new Object[]{templateVmName, templateVmIdInt});
+                } else {
+                    // Snapshots exist, use "current" to clone from current state
+                    actualSnapshotParam = "current";
+                    LOGGER.log(Level.FINE, "Using 'current' snapshot for template VM {0} (ID: {1}) with {2} available snapshots", 
+                              new Object[]{templateVmName, templateVmIdInt, availableSnapshots.size()});
+                }
+            } else {
+                // Validate specific snapshot exists
+                List<String> availableSnapshots = proxmoxApi.getQemuMachineSnapshots(datacenterNode, templateVmIdInt);
+                if (!availableSnapshots.contains(snapshotName)) {
+                    String errorMessage = "Snapshot '" + snapshotName + "' does not exist on template VM " + templateVmName + 
+                                          " (ID: " + templateVmIdInt + "). Available snapshots: " + availableSnapshots + 
+                                          " (Note: 'current' refers to the current state and is always available)";
+                    LOGGER.log(Level.SEVERE, errorMessage);
+                    throw new IllegalStateException(errorMessage);
+                }
+                actualSnapshotParam = snapshotName;
+                LOGGER.log(Level.FINE, "Using snapshot '{0}' for template VM {1} (ID: {2})", 
+                          new Object[]{snapshotName, templateVmName, templateVmIdInt});
+            }
+        }
+        
         Integer nextVmId = getNextAvailableVmId(proxmoxApi);
         
-        String taskStatus = proxmoxApi.cloneQemuMachine(datacenterNode, templateVmIdInt, nextVmId, cloneName);
-        LOGGER.log(Level.INFO, "Cloned VM {0} from template {1}: {2}", 
-                  new Object[]{nextVmId, templateVmIdInt, taskStatus});
+        String taskStatus = null;
+        boolean usedLinkedClone = false;
         
-        if (snapshotName != null && !snapshotName.isEmpty()) {
-            String rollbackStatus = proxmoxApi.rollbackQemuMachineSnapshot(datacenterNode, nextVmId, snapshotName);
-            LOGGER.log(Level.INFO, "Reverted VM {0} to snapshot {1}: {2}", 
-                      new Object[]{nextVmId, snapshotName, rollbackStatus});
+        // Try linked clone first if requested
+        if (linkedClone) {
+            try {
+                taskStatus = proxmoxApi.cloneQemuMachine(datacenterNode, templateVmIdInt, nextVmId, cloneName, false, actualSnapshotParam);
+                usedLinkedClone = true;
+                String snapshotInfo = (actualSnapshotParam != null) ? " from snapshot '" + actualSnapshotParam + "'" : " from current state";
+                LOGGER.log(Level.INFO, "Successfully created linked clone VM {0} (ID: {1}) from template {2} (ID: {3}){4}: {5}", 
+                          new Object[]{cloneName, nextVmId, templateVmName, templateVmIdInt, snapshotInfo, taskStatus});
+            } catch (RuntimeException e) {
+                // Check if the error is due to linked clone not being supported
+                if (e.getMessage() != null && e.getMessage().contains("Linked clone feature is not supported")) {
+                    LOGGER.log(Level.WARNING, "Linked clone not supported for template {0} (ID: {1}), falling back to full clone: {2}", 
+                              new Object[]{templateVmName, templateVmIdInt, e.getMessage()});
+                    // Will fall through to full clone attempt
+                } else {
+                    // Re-throw other types of runtime exceptions
+                    throw e;
+                }
+            }
+        }
+        
+        // If linked clone wasn't requested or failed, try full clone
+        if (taskStatus == null) {
+            taskStatus = proxmoxApi.cloneQemuMachine(datacenterNode, templateVmIdInt, nextVmId, cloneName, true, actualSnapshotParam);
+            String snapshotInfo = (actualSnapshotParam != null) ? " from snapshot '" + actualSnapshotParam + "'" : " from current state";
+            LOGGER.log(Level.INFO, "Created full clone VM {0} (ID: {1}) from template {2} (ID: {3}){4}: {5}", 
+                      new Object[]{cloneName, nextVmId, templateVmName, templateVmIdInt, snapshotInfo, taskStatus});
         }
         
         return nextVmId;
@@ -169,9 +291,9 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
         return vmId;
     }
 
-    private void startClonedVm(Connector proxmoxApi, Integer vmId) throws LoginException {
+    private void startClonedVm(Connector proxmoxApi, Integer vmId, String cloneName) throws LoginException {
         String startStatus = proxmoxApi.startQemuMachine(datacenterNode, vmId);
-        LOGGER.log(Level.INFO, "Started VM {0}: {1}", new Object[]{vmId, startStatus});
+        LOGGER.log(Level.INFO, "Started VM {0} (ID: {1}): {2}", new Object[]{cloneName, vmId, startStatus});
         
         if (startupWaitingPeriodSeconds > 0) {
             try {
@@ -184,22 +306,56 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
     }
 
     private int getCurrentSlaveCount() {
-        int count = 0;
+        int onlineCount = 0;
+        int offlineCount = 0;
+        int tempOfflineCount = 0;
+        int totalMatchingNodes = 0;
+        
         for (Node node : Jenkins.get().getNodes()) {
             if (node instanceof VirtualMachineSlave) {
                 VirtualMachineSlave vmSlave = (VirtualMachineSlave) node;
                 if (templateName.equals(getTemplateNameFromSlave(vmSlave))) {
-                    count++;
+                    totalMatchingNodes++;
+                    if (vmSlave.getComputer() != null) {
+                        if (!vmSlave.getComputer().isOffline()) {
+                            onlineCount++;
+                        } else if (vmSlave.getComputer().isTemporarilyOffline()) {
+                            tempOfflineCount++;
+                        } else {
+                            offlineCount++;
+                        }
+                    } else {
+                        offlineCount++;
+                    }
                 }
             }
         }
-        return count + currentlyProvisioning.get();
+        
+        int currentlyProvisioningCount = (currentlyProvisioning != null ? currentlyProvisioning.get() : 0);
+        int activeCount = onlineCount + tempOfflineCount + currentlyProvisioningCount;
+        
+        LOGGER.log(Level.FINE, "Slave count for template {0}: {1} online, {2} temp-offline, {3} offline, {4} provisioning = {5} active ({6} total nodes)", 
+                  new Object[]{templateName, onlineCount, tempOfflineCount, offlineCount, currentlyProvisioningCount, activeCount, totalMatchingNodes});
+        
+        // Only count online, temporarily offline, and currently provisioning VMs
+        return activeCount;
     }
 
     private String getTemplateNameFromSlave(VirtualMachineSlave slave) {
         String slaveName = slave.getNodeName();
         int dashIndex = slaveName.lastIndexOf('-');
         return dashIndex > 0 ? slaveName.substring(0, dashIndex) : slaveName;
+    }
+
+    private Object readResolve() {
+        // Initialize transient fields after deserialization
+        if (currentlyProvisioning == null) {
+            currentlyProvisioning = new AtomicInteger(0);
+        }
+        if (labelSet == null) {
+            // labelSet will be initialized lazily in getLabelAtoms()
+        }
+        return this;
     }
 
     public String getTemplateName() { return templateName; }
@@ -212,6 +368,7 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
     public int getInstanceCap() { return instanceCap; }
     public int getMaxIdleMinutes() { return maxIdleMinutes; }
     public boolean getStartVM() { return startVM; }
+    public boolean getLinkedClone() { return linkedClone; }
     public int getStartupWaitingPeriodSeconds() { return startupWaitingPeriodSeconds; }
     public ComputerLauncher getLauncher() { return launcher; }
     public RetentionStrategy<?> getRetentionStrategy() { return retentionStrategy; }

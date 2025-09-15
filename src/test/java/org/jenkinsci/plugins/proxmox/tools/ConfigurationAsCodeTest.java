@@ -26,6 +26,7 @@ import org.jenkinsci.plugins.proxmox.Datacenter;
 import org.jenkinsci.plugins.proxmox.VirtualMachineLauncher.RevertPolicy;
 import org.jenkinsci.plugins.proxmox.VirtualMachineSlave;
 import org.jenkinsci.plugins.proxmox.VirtualMachineSlaveComputer;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 @WithJenkinsConfiguredWithCode

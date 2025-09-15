@@ -114,6 +114,30 @@ public class Connector {
         }
         return res;
     }
+    
+    public JSONObject getNodeStatus(String node) throws LoginException {
+        JsonNode response = getJSONResource("nodes/" + node + "/status");
+        return response.getObject().getJSONObject("data");
+    }
+    
+    public JSONObject getClusterStatus() throws LoginException {
+        JsonNode response = getJSONResource("cluster/status");
+        return response.getObject();
+    }
+    
+    public JSONObject getNodeResources(String node) throws LoginException {
+        JsonNode response = getJSONResource("nodes/" + node + "/rrd?timeframe=hour");
+        return response.getObject();
+    }
+    
+    public List<JSONObject> getQemuMachineDetails(String node) throws LoginException {
+        List<JSONObject> res = new ArrayList<>();
+        JSONArray qemuVMs = getJSONResource("nodes/" + node + "/qemu").getObject().getJSONArray("data");
+        for (int i = 0; i < qemuVMs.length(); i++) {
+            res.add(qemuVMs.getJSONObject(i));
+        }
+        return res;
+    }
 
     public JSONObject getTaskStatus(String node, String taskId) throws LoginException {
         JsonNode response = getJSONResource("nodes/" + node + "/tasks/" + taskId + "/status");
@@ -169,35 +193,128 @@ public class Connector {
     }
 
     public String rollbackQemuMachineSnapshot(String node, Integer vmid, String snapshotName) throws LoginException {
-        return postJSONResource(
-                        "nodes/" + node + "/qemu/" + vmid.toString() + "/snapshot/" + snapshotName + "/rollback", "")
-                .getObject()
-                .getString("data");
+        JsonNode response = postJSONResource(
+                "nodes/" + node + "/qemu/" + vmid.toString() + "/snapshot/" + snapshotName + "/rollback", "");
+        JSONObject responseObj = response.getObject();
+        
+        // Check if the response contains an error
+        if (responseObj.has("errors")) {
+            throw new RuntimeException("Proxmox API error during snapshot rollback: " + responseObj.toString());
+        }
+        
+        // Check if data field exists and is not null
+        if (!responseObj.has("data") || responseObj.isNull("data")) {
+            throw new RuntimeException("Proxmox API returned null data for snapshot rollback operation. Response: " + responseObj.toString());
+        }
+        
+        return responseObj.getString("data");
     }
 
     public String startQemuMachine(String node, Integer vmid) throws LoginException {
-        return postJSONResource("nodes/" + node + "/qemu/" + vmid.toString() + "/status/start", "")
-                .getObject()
-                .getString("data");
+        JsonNode response = postJSONResource("nodes/" + node + "/qemu/" + vmid.toString() + "/status/start", "");
+        JSONObject responseObj = response.getObject();
+        
+        // Check if the response contains an error
+        if (responseObj.has("errors")) {
+            throw new RuntimeException("Proxmox API error during VM start: " + responseObj.toString());
+        }
+        
+        // Check if data field exists and is not null
+        if (!responseObj.has("data") || responseObj.isNull("data")) {
+            throw new RuntimeException("Proxmox API returned null data for VM start operation. Response: " + responseObj.toString());
+        }
+        
+        return responseObj.getString("data");
     }
 
     public String stopQemuMachine(String node, Integer vmid) throws LoginException {
-        return postJSONResource("nodes/" + node + "/qemu/" + vmid.toString() + "/status/stop", "")
-                .getObject()
-                .getString("data");
+        JsonNode response = postJSONResource("nodes/" + node + "/qemu/" + vmid.toString() + "/status/stop", "");
+        JSONObject responseObj = response.getObject();
+        
+        // Check if the response contains an error
+        if (responseObj.has("errors")) {
+            throw new RuntimeException("Proxmox API error during VM stop: " + responseObj.toString());
+        }
+        
+        // Check if data field exists and is not null
+        if (!responseObj.has("data") || responseObj.isNull("data")) {
+            throw new RuntimeException("Proxmox API returned null data for VM stop operation. Response: " + responseObj.toString());
+        }
+        
+        return responseObj.getString("data");
     }
 
     public String shutdownQemuMachine(String node, Integer vmid) throws LoginException {
-        return postJSONResource("nodes/" + node + "/qemu/" + vmid.toString() + "/status/shutdown", "")
-                .getObject()
-                .getString("data");
+        JsonNode response = postJSONResource("nodes/" + node + "/qemu/" + vmid.toString() + "/status/shutdown", "");
+        JSONObject responseObj = response.getObject();
+        
+        // Check if the response contains an error
+        if (responseObj.has("errors")) {
+            throw new RuntimeException("Proxmox API error during VM shutdown: " + responseObj.toString());
+        }
+        
+        // Check if data field exists and is not null
+        if (!responseObj.has("data") || responseObj.isNull("data")) {
+            throw new RuntimeException("Proxmox API returned null data for VM shutdown operation. Response: " + responseObj.toString());
+        }
+        
+        return responseObj.getString("data");
     }
 
     public String cloneQemuMachine(String node, Integer vmid, Integer newid, String name) throws LoginException {
+        return cloneQemuMachine(node, vmid, newid, name, true);
+    }
+
+    public String cloneQemuMachine(String node, Integer vmid, Integer newid, String name, boolean fullClone) throws LoginException {
+        return cloneQemuMachine(node, vmid, newid, name, fullClone, null);
+    }
+
+    public String cloneQemuMachine(String node, Integer vmid, Integer newid, String name, boolean fullClone, String snapname) throws LoginException {
         String body = "newid=" + newid + "&name=" + name;
-        return postJSONResource("nodes/" + node + "/qemu/" + vmid.toString() + "/clone", body)
-                .getObject()
-                .getString("data");
+        if (!fullClone) {
+            body += "&full=0";
+        }
+        if (snapname != null && !snapname.isEmpty()) {
+            body += "&snapname=" + snapname;
+        }
+        
+        JsonNode response = postJSONResource("nodes/" + node + "/qemu/" + vmid.toString() + "/clone", body);
+        JSONObject responseObj = response.getObject();
+        
+        // Check if the response contains an error
+        if (responseObj.has("errors")) {
+            throw new RuntimeException("Proxmox API error during clone: " + responseObj.toString());
+        }
+        
+        // Check if data field exists and is not null
+        if (!responseObj.has("data") || responseObj.isNull("data")) {
+            String errorMessage = "Proxmox API returned null data for clone operation";
+            
+            // Check if this is a snapshot-related error
+            if (responseObj.has("message")) {
+                String message = responseObj.getString("message");
+                if (message.contains("snapshot") && message.contains("does not exist")) {
+                    if (snapname != null && !snapname.isEmpty()) {
+                        if ("current".equals(snapname)) {
+                            errorMessage = "Clone operation failed: Proxmox API reports that 'current' snapshot does not exist on VM " + vmid + 
+                                          " on node '" + node + "'. This is unexpected since 'current' should always be available. " +
+                                          "Try cloning without specifying a snapshot, or check if the template VM is in a consistent state.";
+                        } else {
+                            errorMessage = "Clone operation failed: Snapshot '" + snapname + "' does not exist on VM " + vmid + 
+                                          " on node '" + node + "'. Please verify the snapshot exists before attempting to clone.";
+                        }
+                    } else {
+                        errorMessage = "Clone operation failed: " + message;
+                    }
+                } else {
+                    errorMessage = "Clone operation failed: " + message;
+                }
+            }
+            
+            throw new RuntimeException(errorMessage + " Response: " + responseObj.toString());
+        }
+        
+        return responseObj.getString("data");
     }
 
     protected void finalize() {
