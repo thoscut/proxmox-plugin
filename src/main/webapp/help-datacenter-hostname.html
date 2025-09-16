@@ -1,4 +1,17 @@
 <div>
-    The hostname of the Proxmox datacenter. Default port is: 8006.
-    Example: <i>my-proxmox.com</i>
+  <p>
+    The hostname or IP address of your Proxmox Virtual Environment server.
+  </p>
+
+  <h4>Format Options:</h4>
+  <ul>
+    <li><strong>Hostname only:</strong> <code>proxmox.company.com</code> (uses default port 8006)</li>
+    <li><strong>Hostname with port:</strong> <code>proxmox.company.com:8006</code></li>
+    <li><strong>IP address:</strong> <code>192.168.1.100</code> or <code>192.168.1.100:8006</code></li>
+  </ul>
+
+  <p>
+    <strong>Note:</strong> If no port is specified, the default Proxmox web interface port <strong>8006</strong> will be used.
+    Ensure the Jenkins server can reach this address and port.
+  </p>
 </div>

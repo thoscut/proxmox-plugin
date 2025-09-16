@@ -1,3 +1,18 @@
 <div>
-    Snapshot revert can be done after every vm launch (connect etc.) or before every job
+  <p>
+    Controls when the virtual machine is reverted to its snapshot state during the build lifecycle.
+  </p>
+
+  <h4>Available Policies:</h4>
+  <ul>
+    <li><strong>Before Job:</strong> Reverts to snapshot before each Jenkins job starts, ensuring a clean state</li>
+    <li><strong>After Connect:</strong> Reverts to snapshot after VM launch and connection is established</li>
+    <li><strong>Manual:</strong> No automatic revert - must be triggered manually via build steps</li>
+  </ul>
+
+  <p>
+    <strong>Recommendation:</strong> Use "Before Job" for consistent, clean build environments.
+    Use "After Connect" when you need the VM ready immediately but want snapshot reset.
+    Use "Manual" when you need full control over when snapshots are applied.
+  </p>
 </div>

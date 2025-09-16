@@ -1,3 +1,18 @@
 <div>
-    The realm of the user to authenticate under. Default: pve.
+  <p>
+    The authentication realm for the user account in Proxmox VE.
+  </p>
+
+  <h4>Common Realms:</h4>
+  <ul>
+    <li><strong>pve:</strong> Default Proxmox VE realm for built-in users</li>
+    <li><strong>pam:</strong> Linux PAM authentication (system users)</li>
+    <li><strong>ldap:</strong> LDAP directory service</li>
+    <li><strong>ad:</strong> Active Directory integration</li>
+  </ul>
+
+  <p>
+    <strong>Default:</strong> <code>pve</code> - Use this unless you have configured external authentication.
+    The realm must match how the user was created in Proxmox VE.
+  </p>
 </div>

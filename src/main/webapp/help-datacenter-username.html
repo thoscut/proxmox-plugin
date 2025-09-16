@@ -1,3 +1,22 @@
 <div>
-    The username to use when authenticating.
+  <p>
+    The username for authentication with Proxmox VE API.
+  </p>
+
+  <p>
+    <strong>Format:</strong> Use just the username without the realm suffix.
+    The realm is specified separately in the "Realm" field.
+  </p>
+
+  <h4>Examples:</h4>
+  <ul>
+    <li><strong>Built-in user:</strong> <code>jenkins</code> (with realm "pve")</li>
+    <li><strong>System user:</strong> <code>jenkins-user</code> (with realm "pam")</li>
+    <li><strong>LDAP user:</strong> <code>jenkins.service</code> (with realm "ldap")</li>
+  </ul>
+
+  <p>
+    <strong>Note:</strong> Ensure this user has the necessary permissions for VM operations.
+    Consider creating a dedicated service account for Jenkins integration.
+  </p>
 </div>
