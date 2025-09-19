@@ -329,11 +329,6 @@ public class Datacenter extends Cloud {
     @Extension
     @Symbol("datacenter")
     public static final class DescriptorImpl extends Descriptor<Cloud> {
-        
-        public DescriptorImpl() {
-            super(Datacenter.class);
-        }
-        
         @Override
         public String getDisplayName() {
             return "Proxmox Datacenter";
