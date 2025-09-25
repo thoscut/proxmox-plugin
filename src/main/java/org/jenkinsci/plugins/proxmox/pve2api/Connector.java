@@ -192,6 +192,52 @@ public class Connector {
         return res;
     }
 
+    public String createQemuMachineSnapshot(String node, Integer vmid, String snapshotName) throws LoginException {
+        return createQemuMachineSnapshot(node, vmid, snapshotName, null, true);
+    }
+
+    public String createQemuMachineSnapshot(String node, Integer vmid, String snapshotName, String description, boolean includeRam) throws LoginException {
+        String body = "snapname=" + snapshotName;
+        if (description != null && !description.isEmpty()) {
+            body += "&description=" + description;
+        }
+        if (includeRam) {
+            body += "&vmstate=1";
+        }
+
+        JsonNode response = postJSONResource("nodes/" + node + "/qemu/" + vmid.toString() + "/snapshot", body);
+        JSONObject responseObj = response.getObject();
+
+        // Check if the response contains an error
+        if (responseObj.has("errors")) {
+            throw new RuntimeException("Proxmox API error during snapshot creation: " + responseObj.toString());
+        }
+
+        // Check if data field exists and is not null
+        if (!responseObj.has("data") || responseObj.isNull("data")) {
+            throw new RuntimeException("Proxmox API returned null data for snapshot creation operation. Response: " + responseObj.toString());
+        }
+
+        return responseObj.getString("data");
+    }
+
+    public String deleteQemuMachineSnapshot(String node, Integer vmid, String snapshotName) throws LoginException {
+        HttpResponse<JsonNode> response = JSONResource(unirest.delete(baseURL + "nodes/" + node + "/qemu/" + vmid.toString() + "/snapshot/" + snapshotName));
+        JSONObject responseObj = response.getBody().getObject();
+
+        // Check if the response contains an error
+        if (responseObj.has("errors")) {
+            throw new RuntimeException("Proxmox API error during snapshot deletion: " + responseObj.toString());
+        }
+
+        // Check if data field exists and is not null
+        if (!responseObj.has("data") || responseObj.isNull("data")) {
+            throw new RuntimeException("Proxmox API returned null data for snapshot deletion operation. Response: " + responseObj.toString());
+        }
+
+        return responseObj.getString("data");
+    }
+
     public String rollbackQemuMachineSnapshot(String node, Integer vmid, String snapshotName) throws LoginException {
         JsonNode response = postJSONResource(
                 "nodes/" + node + "/qemu/" + vmid.toString() + "/snapshot/" + snapshotName + "/rollback", "");
@@ -277,30 +323,30 @@ public class Connector {
         if (snapname != null && !snapname.isEmpty()) {
             body += "&snapname=" + snapname;
         }
-        
+
         JsonNode response = postJSONResource("nodes/" + node + "/qemu/" + vmid.toString() + "/clone", body);
         JSONObject responseObj = response.getObject();
-        
+
         // Check if the response contains an error
         if (responseObj.has("errors")) {
             throw new RuntimeException("Proxmox API error during clone: " + responseObj.toString());
         }
-        
+
         // Check if data field exists and is not null
         if (!responseObj.has("data") || responseObj.isNull("data")) {
             String errorMessage = "Proxmox API returned null data for clone operation";
-            
+
             // Check if this is a snapshot-related error
             if (responseObj.has("message")) {
                 String message = responseObj.getString("message");
                 if (message.contains("snapshot") && message.contains("does not exist")) {
                     if (snapname != null && !snapname.isEmpty()) {
                         if ("current".equals(snapname)) {
-                            errorMessage = "Clone operation failed: Proxmox API reports that 'current' snapshot does not exist on VM " + vmid + 
+                            errorMessage = "Clone operation failed: Proxmox API reports that 'current' snapshot does not exist on VM " + vmid +
                                           " on node '" + node + "'. This is unexpected since 'current' should always be available. " +
                                           "Try cloning without specifying a snapshot, or check if the template VM is in a consistent state.";
                         } else {
-                            errorMessage = "Clone operation failed: Snapshot '" + snapname + "' does not exist on VM " + vmid + 
+                            errorMessage = "Clone operation failed: Snapshot '" + snapname + "' does not exist on VM " + vmid +
                                           " on node '" + node + "'. Please verify the snapshot exists before attempting to clone.";
                         }
                     } else {
@@ -310,10 +356,79 @@ public class Connector {
                     errorMessage = "Clone operation failed: " + message;
                 }
             }
-            
+
             throw new RuntimeException(errorMessage + " Response: " + responseObj.toString());
         }
-        
+
+        return responseObj.getString("data");
+    }
+
+    public String convertQemuMachineToTemplate(String node, Integer vmid) throws LoginException {
+        JsonNode response = postJSONResource("nodes/" + node + "/qemu/" + vmid.toString() + "/template", "");
+        JSONObject responseObj = response.getObject();
+
+        // Check if the response contains an error
+        if (responseObj.has("errors")) {
+            throw new RuntimeException("Proxmox API error during convert to template: " + responseObj.toString());
+        }
+
+        // Check if data field exists and is not null
+        if (!responseObj.has("data") || responseObj.isNull("data")) {
+            throw new RuntimeException("Proxmox API returned null data for convert to template operation. Response: " + responseObj.toString());
+        }
+
+        return responseObj.getString("data");
+    }
+
+    public String pauseQemuMachine(String node, Integer vmid) throws LoginException {
+        JsonNode response = postJSONResource("nodes/" + node + "/qemu/" + vmid.toString() + "/status/suspend", "");
+        JSONObject responseObj = response.getObject();
+
+        // Check if the response contains an error
+        if (responseObj.has("errors")) {
+            throw new RuntimeException("Proxmox API error during VM pause: " + responseObj.toString());
+        }
+
+        // Check if data field exists and is not null
+        if (!responseObj.has("data") || responseObj.isNull("data")) {
+            throw new RuntimeException("Proxmox API returned null data for VM pause operation. Response: " + responseObj.toString());
+        }
+
+        return responseObj.getString("data");
+    }
+
+    public String resumeQemuMachine(String node, Integer vmid) throws LoginException {
+        JsonNode response = postJSONResource("nodes/" + node + "/qemu/" + vmid.toString() + "/status/resume", "");
+        JSONObject responseObj = response.getObject();
+
+        // Check if the response contains an error
+        if (responseObj.has("errors")) {
+            throw new RuntimeException("Proxmox API error during VM resume: " + responseObj.toString());
+        }
+
+        // Check if data field exists and is not null
+        if (!responseObj.has("data") || responseObj.isNull("data")) {
+            throw new RuntimeException("Proxmox API returned null data for VM resume operation. Response: " + responseObj.toString());
+        }
+
+        return responseObj.getString("data");
+    }
+
+    public String hibernateQemuMachine(String node, Integer vmid) throws LoginException {
+        String body = "todisk=1";
+        JsonNode response = postJSONResource("nodes/" + node + "/qemu/" + vmid.toString() + "/status/suspend", body);
+        JSONObject responseObj = response.getObject();
+
+        // Check if the response contains an error
+        if (responseObj.has("errors")) {
+            throw new RuntimeException("Proxmox API error during VM hibernation: " + responseObj.toString());
+        }
+
+        // Check if data field exists and is not null
+        if (!responseObj.has("data") || responseObj.isNull("data")) {
+            throw new RuntimeException("Proxmox API returned null data for VM hibernation operation. Response: " + responseObj.toString());
+        }
+
         return responseObj.getString("data");
     }
 
