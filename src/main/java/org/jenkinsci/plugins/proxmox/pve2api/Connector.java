@@ -432,6 +432,25 @@ public class Connector {
         return responseObj.getString("data");
     }
 
+    public String deleteQemuMachine(String node, Integer vmid) throws LoginException {
+        HttpResponse<JsonNode> response = JSONResource(unirest.delete(baseURL + "nodes/" + node + "/qemu/" + vmid.toString()));
+        JSONObject responseObj = response.getBody().getObject();
+
+        // Check if the response contains an error
+        if (responseObj.has("errors")) {
+            throw new RuntimeException("Proxmox API error during VM deletion: " + responseObj.toString());
+        }
+
+        // For deletion, sometimes the response may not have a data field or it may be null
+        // This is acceptable as the deletion operation may complete immediately
+        if (responseObj.has("data") && !responseObj.isNull("data")) {
+            return responseObj.getString("data");
+        } else {
+            // Return success indicator for immediate deletions
+            return "VM deletion completed";
+        }
+    }
+
     protected void finalize() {
         unirest.shutDown();
     }

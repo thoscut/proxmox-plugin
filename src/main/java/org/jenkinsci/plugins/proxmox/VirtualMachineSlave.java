@@ -375,4 +375,15 @@ public class VirtualMachineSlave extends Slave {
             return null;
         }
     }
+
+    /**
+     * Handle deserialization properly.
+     * This fixes the Jenkins warning about readResolve() not calling super implementation.
+     */
+    protected Object readResolve() {
+        // Call the superclass readResolve to ensure proper deserialization
+        Object result = super.readResolve();
+        // Return the result from the superclass
+        return result;
+    }
 }

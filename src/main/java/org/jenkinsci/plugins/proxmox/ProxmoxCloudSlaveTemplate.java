@@ -18,6 +18,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -35,6 +36,9 @@ import org.kohsuke.stapler.verb.POST;
 public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCloudSlaveTemplate> {
 
     private static final Logger LOGGER = Logger.getLogger(ProxmoxCloudSlaveTemplate.class.getName());
+
+    // Synchronization map to prevent concurrent clone operations from the same template VM
+    private static final ConcurrentHashMap<String, Object> CLONE_LOCKS = new ConcurrentHashMap<>();
     
     private final String templateName;
     private final String labels;
@@ -173,8 +177,8 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
         
         // Fallback to configured template name if not found
         if (actualTemplateName == null) {
-            LOGGER.log(Level.WARNING, "Could not find template VM with ID {0}, using configured template name: {1}", 
-                      new Object[]{templateVmId, templateName});
+            LOGGER.log(Level.WARNING, "Could not find template VM with ID {0}, using configured template name: {1}",
+                      new Object[]{templateVmId.toString(), templateName});
             actualTemplateName = templateName;
         }
         
@@ -182,6 +186,28 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
     }
 
     private Integer cloneVmFromTemplate(Connector proxmoxApi, String cloneName) throws LoginException {
+        // Create a unique lock key based on datacenter node and template VM ID to prevent concurrent clones
+        String lockKey = datacenterNode + ":" + templateVmId;
+        Object lock = CLONE_LOCKS.computeIfAbsent(lockKey, k -> new Object());
+
+        LOGGER.log(Level.INFO, "Acquiring clone lock for template VM {0} on node {1} (key: {2})",
+                  new Object[]{templateVmId, datacenterNode, lockKey});
+
+        synchronized (lock) {
+            LOGGER.log(Level.INFO, "Clone lock acquired for template VM {0} on node {1}, starting clone operation",
+                      new Object[]{templateVmId, datacenterNode});
+            try {
+                return performClone(proxmoxApi, cloneName, lockKey);
+            } finally {
+                LOGGER.log(Level.INFO, "Clone operation completed for template VM {0} on node {1}, releasing lock",
+                          new Object[]{templateVmId, datacenterNode});
+                // Clean up the lock if no other threads are waiting - this helps prevent memory leaks
+                // We keep it simple and let the GC handle cleanup when the map grows too large
+            }
+        }
+    }
+
+    private Integer performClone(Connector proxmoxApi, String cloneName, String lockKey) throws LoginException {
         Integer templateVmIdInt = Integer.parseInt(templateVmId);
         
         // Get template name for better logging
@@ -198,19 +224,8 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
             templateVmName = "VM-" + templateVmIdInt;
         }
         
-        // Check if template VM is running - cloning running VMs can cause issues
-        boolean templateIsRunning = proxmoxApi.isQemuMachineRunning(datacenterNode, templateVmIdInt);
-        if (templateIsRunning) {
-            String errorMessage = "Cannot clone from running template VM " + templateVmName + " (ID: " + templateVmIdInt + 
-                                  "). Template VM must be stopped before cloning to avoid data corruption and ensure consistent clones.";
-            LOGGER.log(Level.SEVERE, errorMessage);
-            throw new IllegalStateException(errorMessage);
-        }
-        
-        LOGGER.log(Level.FINE, "Template VM {0} (ID: {1}) is stopped, proceeding with clone operation", 
-                  new Object[]{templateVmName, templateVmIdInt});
-        
-        // Determine the actual snapshot parameter to use
+        // Determine the actual snapshot parameter to use first
+        // This affects whether we can clone from a running VM
         String actualSnapshotParam = null;
         if (snapshotName != null && !snapshotName.isEmpty()) {
             if ("current".equals(snapshotName)) {
@@ -219,13 +234,13 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
                 if (availableSnapshots.isEmpty()) {
                     // No snapshots exist, clone current state without snapshot parameter
                     actualSnapshotParam = null;
-                    LOGGER.log(Level.FINE, "Template VM {0} (ID: {1}) has no snapshots, cloning current state directly", 
-                              new Object[]{templateVmName, templateVmIdInt});
+                    LOGGER.log(Level.FINE, "Template VM {0} (ID: {1}) has no snapshots, cloning current state directly",
+                              new Object[]{templateVmName, templateVmIdInt.toString()});
                 } else {
                     // Snapshots exist, use "current" to clone from current state
                     actualSnapshotParam = "current";
-                    LOGGER.log(Level.FINE, "Using 'current' snapshot for template VM {0} (ID: {1}) with {2} available snapshots", 
-                              new Object[]{templateVmName, templateVmIdInt, availableSnapshots.size()});
+                    LOGGER.log(Level.FINE, "Using 'current' snapshot for template VM {0} (ID: {1}) with {2} available snapshots",
+                              new Object[]{templateVmName, templateVmIdInt.toString(), availableSnapshots.size()});
                 }
             } else {
                 // Validate specific snapshot exists
@@ -238,11 +253,31 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
                     throw new IllegalStateException(errorMessage);
                 }
                 actualSnapshotParam = snapshotName;
-                LOGGER.log(Level.FINE, "Using snapshot '{0}' for template VM {1} (ID: {2})", 
-                          new Object[]{snapshotName, templateVmName, templateVmIdInt});
+                LOGGER.log(Level.FINE, "Using snapshot '{0}' for template VM {1} (ID: {2})",
+                          new Object[]{snapshotName, templateVmName, templateVmIdInt.toString()});
             }
         }
-        
+
+        // Check if template VM is running - only block if explicitly cloning from "current" state
+        // Note: We allow cloning from running VMs when no snapshot is specified (default behavior)
+        // or when using a specific snapshot name
+        boolean templateIsRunning = proxmoxApi.isQemuMachineRunning(datacenterNode, templateVmIdInt);
+        if (templateIsRunning && "current".equals(actualSnapshotParam)) {
+            String errorMessage = "Cannot clone from running template VM " + templateVmName + " (ID: " + templateVmIdInt +
+                                  ") using 'current' snapshot. Template VM must be stopped before cloning from current state " +
+                                  "to avoid data corruption. To clone from a running VM, select a specific snapshot instead of 'current'.";
+            LOGGER.log(Level.SEVERE, errorMessage);
+            throw new IllegalStateException(errorMessage);
+        }
+
+        if (templateIsRunning) {
+            LOGGER.log(Level.INFO, "Template VM {0} (ID: {1}) is running, but cloning from snapshot '{2}' is safe",
+                      new Object[]{templateVmName, templateVmIdInt.toString(), actualSnapshotParam});
+        } else {
+            LOGGER.log(Level.FINE, "Template VM {0} (ID: {1}) is stopped, proceeding with clone operation",
+                      new Object[]{templateVmName, templateVmIdInt.toString()});
+        }
+
         Integer nextVmId = getNextAvailableVmId(proxmoxApi);
         
         String taskStatus = null;
@@ -254,13 +289,13 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
                 taskStatus = proxmoxApi.cloneQemuMachine(datacenterNode, templateVmIdInt, nextVmId, cloneName, false, actualSnapshotParam);
                 usedLinkedClone = true;
                 String snapshotInfo = (actualSnapshotParam != null) ? " from snapshot '" + actualSnapshotParam + "'" : " from current state";
-                LOGGER.log(Level.INFO, "Successfully created linked clone VM {0} (ID: {1}) from template {2} (ID: {3}){4}: {5}", 
-                          new Object[]{cloneName, nextVmId, templateVmName, templateVmIdInt, snapshotInfo, taskStatus});
+                LOGGER.log(Level.INFO, "Started linked clone task for VM {0} (ID: {1}) from template {2} (ID: {3}){4}: {5}",
+                          new Object[]{cloneName, nextVmId.toString(), templateVmName, templateVmIdInt.toString(), snapshotInfo, taskStatus});
             } catch (RuntimeException e) {
                 // Check if the error is due to linked clone not being supported
                 if (e.getMessage() != null && e.getMessage().contains("Linked clone feature is not supported")) {
-                    LOGGER.log(Level.WARNING, "Linked clone not supported for template {0} (ID: {1}), falling back to full clone: {2}", 
-                              new Object[]{templateVmName, templateVmIdInt, e.getMessage()});
+                    LOGGER.log(Level.WARNING, "Linked clone not supported for template {0} (ID: {1}), falling back to full clone: {2}",
+                              new Object[]{templateVmName, templateVmIdInt.toString(), e.getMessage()});
                     // Will fall through to full clone attempt
                 } else {
                     // Re-throw other types of runtime exceptions
@@ -268,34 +303,139 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
                 }
             }
         }
-        
+
         // If linked clone wasn't requested or failed, try full clone
         if (taskStatus == null) {
             taskStatus = proxmoxApi.cloneQemuMachine(datacenterNode, templateVmIdInt, nextVmId, cloneName, true, actualSnapshotParam);
             String snapshotInfo = (actualSnapshotParam != null) ? " from snapshot '" + actualSnapshotParam + "'" : " from current state";
-            LOGGER.log(Level.INFO, "Created full clone VM {0} (ID: {1}) from template {2} (ID: {3}){4}: {5}", 
-                      new Object[]{cloneName, nextVmId, templateVmName, templateVmIdInt, snapshotInfo, taskStatus});
+            LOGGER.log(Level.INFO, "Started full clone task for VM {0} (ID: {1}) from template {2} (ID: {3}){4}: {5}",
+                      new Object[]{cloneName, nextVmId.toString(), templateVmName, templateVmIdInt.toString(), snapshotInfo, taskStatus});
+        }
+
+        // Wait for clone task to complete before proceeding
+        LOGGER.log(Level.INFO, "Waiting for clone task {0} to complete for VM {1}...",
+                  new Object[]{taskStatus, cloneName});
+        try {
+            JSONObject taskResult = proxmoxApi.waitForTaskToFinish(datacenterNode, taskStatus);
+            String finalStatus = taskResult.getString("status");
+            String exitStatus = taskResult.has("exitstatus") ? taskResult.getString("exitstatus") : null;
+
+            // Debug logging to understand the exact values
+            LOGGER.log(Level.INFO, "DEBUG: Clone task result for VM {0} - finalStatus='{1}', exitStatus='{2}', has_exitstatus={3}",
+                      new Object[]{cloneName, finalStatus, exitStatus, taskResult.has("exitstatus")});
+
+            // Proxmox tasks can have status "stopped" with exitstatus "OK" for success
+            // or status "OK" for immediate success
+            boolean isSuccess = "OK".equals(finalStatus) ||
+                               ("stopped".equals(finalStatus) && "OK".equals(exitStatus));
+
+            LOGGER.log(Level.INFO, "DEBUG: Success evaluation for VM {0} - isSuccess={1}, condition1={2}, condition2={3}",
+                      new Object[]{cloneName, isSuccess, "OK".equals(finalStatus),
+                                  ("stopped".equals(finalStatus) && "OK".equals(exitStatus))});
+
+            if (isSuccess) {
+                LOGGER.log(Level.INFO, "Clone task completed successfully for VM {0} (ID: {1}) - status: {2}, exitstatus: {3}",
+                          new Object[]{cloneName, nextVmId.toString(), finalStatus, exitStatus});
+            } else {
+                String errorMsg = "Clone task failed with status: " + finalStatus;
+                if (exitStatus != null) {
+                    errorMsg += ", exit status: " + exitStatus;
+                }
+                if (taskResult.has("errors") && !taskResult.isNull("errors")) {
+                    errorMsg += ", errors: " + taskResult.getString("errors");
+                }
+                LOGGER.log(Level.SEVERE, "Clone task failed for VM {0}: {1}", new Object[]{cloneName, errorMsg});
+                throw new RuntimeException("Clone failed for VM " + cloneName + ": " + errorMsg);
+            }
+        } catch (Exception e) {
+            String errorMessage = "Clone task failed for VM " + cloneName + " (ID: " + nextVmId + "): " + e.getMessage();
+            LOGGER.log(Level.SEVERE, errorMessage, e);
+            throw new RuntimeException(errorMessage, e);
         }
         
         return nextVmId;
     }
 
     private Integer getNextAvailableVmId(Connector proxmoxApi) throws LoginException {
-        HashMap<String, Integer> existingVms = proxmoxApi.getQemuMachines(datacenterNode);
-        int vmId = 1000;
-        
-        while (existingVms.containsValue(vmId)) {
-            vmId++;
+        // Use per-datacenter synchronization instead of global lock to prevent blocking other datacenters
+        synchronized (this.datacenterNode.intern()) {
+            // Use timestamp-based approach to reduce collisions
+            long timestamp = System.currentTimeMillis();
+            int baseId = 1000 + (int)(timestamp % 8000); // Spread IDs across 1000-9000 range
+
+            // Get fresh VM list
+            HashMap<String, Integer> existingVms = proxmoxApi.getQemuMachines(datacenterNode);
+
+            // Start from timestamp-based ID and search for available ID
+            int vmId = baseId;
+            int attempts = 0;
+
+            while (existingVms.containsValue(vmId) && attempts < 10000) {
+                vmId++;
+                attempts++;
+
+                // Wrap around if we exceed reasonable range
+                if (vmId > 99999) {
+                    vmId = 1000;
+                }
+
+                // Avoid infinite loop
+                if (vmId == baseId && attempts > 100) {
+                    throw new RuntimeException("Unable to find available VM ID after " + attempts + " attempts on node " + datacenterNode);
+                }
+            }
+
+            if (existingVms.containsValue(vmId)) {
+                throw new RuntimeException("No available VM IDs found in range 1000-99999 on node " + datacenterNode);
+            }
+
+            LOGGER.log(Level.FINE, "Selected VM ID {0} for new clone on node {1} (base: {2}, attempts: {3})",
+                      new Object[]{String.valueOf(vmId), datacenterNode, String.valueOf(baseId), String.valueOf(attempts)});
+            return vmId;
         }
-        
-        return vmId;
     }
 
     private void startClonedVm(Connector proxmoxApi, Integer vmId, String cloneName) throws LoginException {
-        String startStatus = proxmoxApi.startQemuMachine(datacenterNode, vmId);
-        LOGGER.log(Level.INFO, "Started VM {0} (ID: {1}): {2}", new Object[]{cloneName, vmId, startStatus});
-        
+        LOGGER.log(Level.INFO, "Starting cloned VM {0} (ID: {1}) - clone has completed successfully",
+                  new Object[]{cloneName, vmId.toString()});
+
+        String startTaskId = proxmoxApi.startQemuMachine(datacenterNode, vmId);
+        LOGGER.log(Level.INFO, "VM start task initiated for {0} (ID: {1}): {2}",
+                  new Object[]{cloneName, vmId.toString(), startTaskId});
+
+        // Wait for VM start task to complete
+        try {
+            JSONObject startTaskResult = proxmoxApi.waitForTaskToFinish(datacenterNode, startTaskId);
+            String startStatus = startTaskResult.getString("status");
+            String startExitStatus = startTaskResult.has("exitstatus") ? startTaskResult.getString("exitstatus") : null;
+
+            // Proxmox tasks can have status "stopped" with exitstatus "OK" for success
+            // or status "OK" for immediate success
+            boolean isSuccess = "OK".equals(startStatus) ||
+                               ("stopped".equals(startStatus) && "OK".equals(startExitStatus));
+
+            if (isSuccess) {
+                LOGGER.log(Level.INFO, "VM {0} (ID: {1}) started successfully - status: {2}, exitstatus: {3}",
+                          new Object[]{cloneName, vmId.toString(), startStatus, startExitStatus});
+            } else {
+                String errorMsg = "VM start task failed with status: " + startStatus;
+                if (startExitStatus != null) {
+                    errorMsg += ", exit status: " + startExitStatus;
+                }
+                if (startTaskResult.has("errors") && !startTaskResult.isNull("errors")) {
+                    errorMsg += ", errors: " + startTaskResult.getString("errors");
+                }
+                LOGGER.log(Level.WARNING, "VM start failed for {0}: {1}", new Object[]{cloneName, errorMsg});
+                throw new RuntimeException("VM start failed for " + cloneName + ": " + errorMsg);
+            }
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "VM start task failed for " + cloneName + ": " + e.getMessage(), e);
+            throw new RuntimeException("VM start failed for " + cloneName, e);
+        }
+
         if (startupWaitingPeriodSeconds > 0) {
+            LOGGER.log(Level.INFO, "Waiting additional {0} seconds for VM {1} to fully boot...",
+                      new Object[]{startupWaitingPeriodSeconds, cloneName});
             try {
                 Thread.sleep(startupWaitingPeriodSeconds * 1000L);
             } catch (InterruptedException e) {

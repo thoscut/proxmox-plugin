@@ -151,10 +151,16 @@ public class ProxmoxCloudStatistics implements Serializable {
         failedProvisionings++;
         lastProvisioningResult = "Failed: " + error;
         lastErrorMessage = error;
-        LOGGER.log(Level.WARNING, "Provisioning failed for {0}: {1}", 
+        LOGGER.log(Level.WARNING, "Provisioning failed for {0}: {1}",
                   new Object[]{datacenterDescription, error});
     }
-    
+
+    public void recordTermination() {
+        LOGGER.log(Level.FINE, "VM termination recorded for datacenter: {0}", datacenterDescription);
+        // Update current status to reflect the termination
+        updateCurrentStatus();
+    }
+
     public void updateCurrentStatus() {
         try {
             updateSlaveCounters();
