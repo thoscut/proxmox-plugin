@@ -229,19 +229,10 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
         String actualSnapshotParam = null;
         if (snapshotName != null && !snapshotName.isEmpty()) {
             if ("current".equals(snapshotName)) {
-                // For "current", check if VM has any snapshots at all
-                List<String> availableSnapshots = proxmoxApi.getQemuMachineSnapshots(datacenterNode, templateVmIdInt);
-                if (availableSnapshots.isEmpty()) {
-                    // No snapshots exist, clone current state without snapshot parameter
-                    actualSnapshotParam = null;
-                    LOGGER.log(Level.FINE, "Template VM {0} (ID: {1}) has no snapshots, cloning current state directly",
-                              new Object[]{templateVmName, templateVmIdInt.toString()});
-                } else {
-                    // Snapshots exist, use "current" to clone from current state
-                    actualSnapshotParam = "current";
-                    LOGGER.log(Level.FINE, "Using 'current' snapshot for template VM {0} (ID: {1}) with {2} available snapshots",
-                              new Object[]{templateVmName, templateVmIdInt.toString(), availableSnapshots.size()});
-                }
+                // For "current", always clone from current state without snapshot parameter
+                actualSnapshotParam = null;
+                LOGGER.log(Level.FINE, "Cloning from current state of template VM {0} (ID: {1}) - no snapshot parameter used",
+                          new Object[]{templateVmName, templateVmIdInt.toString()});
             } else {
                 // Validate specific snapshot exists
                 List<String> availableSnapshots = proxmoxApi.getQemuMachineSnapshots(datacenterNode, templateVmIdInt);
@@ -259,23 +250,27 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
         }
 
         // Check if template VM is running - only block if explicitly cloning from "current" state
-        // Note: We allow cloning from running VMs when no snapshot is specified (default behavior)
-        // or when using a specific snapshot name
+        // Note: We allow cloning from running VMs when using a specific snapshot name
         boolean templateIsRunning = proxmoxApi.isQemuMachineRunning(datacenterNode, templateVmIdInt);
-        if (templateIsRunning && "current".equals(actualSnapshotParam)) {
+        boolean isCloningFromCurrentState = "current".equals(snapshotName) || (snapshotName == null || snapshotName.isEmpty());
+
+        if (templateIsRunning && isCloningFromCurrentState && actualSnapshotParam == null) {
             String errorMessage = "Cannot clone from running template VM " + templateVmName + " (ID: " + templateVmIdInt +
-                                  ") using 'current' snapshot. Template VM must be stopped before cloning from current state " +
-                                  "to avoid data corruption. To clone from a running VM, select a specific snapshot instead of 'current'.";
+                                  ") from current state. Template VM must be stopped before cloning from current state " +
+                                  "to avoid data corruption. To clone from a running VM, select a specific snapshot instead.";
             LOGGER.log(Level.SEVERE, errorMessage);
             throw new IllegalStateException(errorMessage);
         }
 
         if (templateIsRunning) {
-            LOGGER.log(Level.INFO, "Template VM {0} (ID: {1}) is running, but cloning from snapshot '{2}' is safe",
-                      new Object[]{templateVmName, templateVmIdInt.toString(), actualSnapshotParam});
+            if (actualSnapshotParam != null) {
+                LOGGER.log(Level.INFO, "Template VM {0} (ID: {1}) is running, but cloning from snapshot '{2}' is safe",
+                          new Object[]{templateVmName, templateVmIdInt.toString(), actualSnapshotParam});
+            }
         } else {
-            LOGGER.log(Level.FINE, "Template VM {0} (ID: {1}) is stopped, proceeding with clone operation",
-                      new Object[]{templateVmName, templateVmIdInt.toString()});
+            String stateInfo = actualSnapshotParam != null ? "from snapshot '" + actualSnapshotParam + "'" : "from current state";
+            LOGGER.log(Level.FINE, "Template VM {0} (ID: {1}) is stopped, proceeding with clone operation {2}",
+                      new Object[]{templateVmName, templateVmIdInt.toString(), stateInfo});
         }
 
         Integer nextVmId = getNextAvailableVmId(proxmoxApi);
