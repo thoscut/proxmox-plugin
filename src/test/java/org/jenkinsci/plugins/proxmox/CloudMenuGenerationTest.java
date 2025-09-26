@@ -1,6 +1,5 @@
 package org.jenkinsci.plugins.proxmox;
 
-import hudson.util.Secret;
 import jenkins.model.Jenkins;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
@@ -26,9 +25,8 @@ public class CloudMenuGenerationTest {
         // Create a datacenter instance
         Datacenter datacenter = new Datacenter(
                 "test.example.com",
-                "testuser", 
+                "test-credentials",
                 "pve",
-                Secret.fromString("testpass"),
                 true,
                 new ArrayList<>(),
                 10
@@ -51,9 +49,8 @@ public class CloudMenuGenerationTest {
         // Create and add a datacenter to Jenkins
         Datacenter datacenter = new Datacenter(
                 "test.example.com",
-                "testuser",
-                "pve", 
-                Secret.fromString("testpass"),
+                "test-credentials",
+                "pve",
                 true,
                 new ArrayList<>(),
                 5
@@ -76,9 +73,8 @@ public class CloudMenuGenerationTest {
         // Create a datacenter instance
         Datacenter datacenter = new Datacenter(
                 "test.example.com",
-                "testuser",
+                "test-credentials",
                 "pve",
-                Secret.fromString("testpass"), 
                 true,
                 new ArrayList<>(),
                 10
@@ -128,10 +124,9 @@ public class CloudMenuGenerationTest {
     public void testCloudPageAccessibility(JenkinsRule r) throws Exception {
         // Create and add a datacenter
         Datacenter datacenter = new Datacenter(
-                "test.example.com", 
-                "testuser",
+                "test.example.com",
+                "test-credentials",
                 "pve",
-                Secret.fromString("testpass"),
                 true,
                 new ArrayList<>(),
                 10
@@ -160,9 +155,8 @@ public class CloudMenuGenerationTest {
         // Verify that cloud statistics don't interfere with menu generation
         Datacenter datacenter = new Datacenter(
                 "test.example.com",
-                "testuser", 
+                "test-credentials",
                 "pve",
-                Secret.fromString("testpass"),
                 true,
                 new ArrayList<>(),
                 10
@@ -190,9 +184,8 @@ public class CloudMenuGenerationTest {
         // Verify that we don't have custom URL methods that would interfere with Jenkins
         Datacenter datacenter = new Datacenter(
                 "test.example.com",
-                "testuser",
-                "pve", 
-                Secret.fromString("testpass"),
+                "test-credentials",
+                "pve",
                 true,
                 new ArrayList<>(),
                 10

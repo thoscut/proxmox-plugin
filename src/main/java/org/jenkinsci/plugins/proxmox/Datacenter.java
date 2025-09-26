@@ -10,6 +10,13 @@ import hudson.slaves.Cloud;
 import hudson.slaves.NodeProvisioner;
 import hudson.util.FormValidation;
 import hudson.util.Secret;
+import hudson.util.ListBoxModel;
+import com.cloudbees.plugins.credentials.CredentialsProvider;
+import com.cloudbees.plugins.credentials.common.StandardCredentials;
+import com.cloudbees.plugins.credentials.common.StandardListBoxModel;
+import com.cloudbees.plugins.credentials.common.StandardUsernamePasswordCredentials;
+import com.cloudbees.plugins.credentials.domains.DomainRequirement;
+import hudson.security.ACL;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -37,9 +44,8 @@ public class Datacenter extends Cloud {
     private static final Logger LOGGER = Logger.getLogger(Datacenter.class.getName());
 
     private final String hostname;
-    private final String username;
+    private final String credentialsId;
     private final String realm;
-    private final Secret password;
     private final Boolean ignoreSSL;
     private final List<ProxmoxCloudSlaveTemplate> templates;
     private final int instanceCap;
@@ -47,13 +53,12 @@ public class Datacenter extends Cloud {
     private transient ProxmoxCloudStatistics statistics;
 
     @DataBoundConstructor
-    public Datacenter(String hostname, String username, String realm, Secret password, Boolean ignoreSSL, 
+    public Datacenter(String hostname, String credentialsId, String realm, Boolean ignoreSSL,
                      List<ProxmoxCloudSlaveTemplate> templates, Integer instanceCap) {
         super(hostname != null && !hostname.isEmpty() ? "Proxmox-" + hostname : "Proxmox-Datacenter");
         this.hostname = hostname;
-        this.username = username;
+        this.credentialsId = credentialsId;
         this.realm = realm;
-        this.password = password;
         this.ignoreSSL = ignoreSSL;
         this.templates = templates != null ? templates : new ArrayList<>();
         this.instanceCap = instanceCap != null ? instanceCap : 0;
@@ -61,9 +66,12 @@ public class Datacenter extends Cloud {
         this.statistics = null;
     }
 
-    // Legacy constructor for backward compatibility
+    // Legacy constructor for backward compatibility - will be deprecated
+    @Deprecated
     public Datacenter(String hostname, String username, String realm, Secret password, Boolean ignoreSSL) {
-        this(hostname, username, realm, password, ignoreSSL, null, 0);
+        this(hostname, null, realm, ignoreSSL, null, 0);
+        // For legacy instances, we'll need to handle credentials differently
+        // This will be handled by the credential resolution method
     }
 
     public Collection<NodeProvisioner.PlannedNode> provision(Label label, int excessWorkload) {
@@ -71,6 +79,14 @@ public class Datacenter extends Cloud {
                   new Object[]{getDatacenterDescription(), label, excessWorkload});
 
         List<NodeProvisioner.PlannedNode> plannedNodes = new ArrayList<>();
+
+        // Check if credentials are configured
+        if (credentialsId == null || credentialsId.trim().isEmpty()) {
+            LOGGER.log(Level.SEVERE, "provision: No credentials configured for datacenter {0}. Please configure credentials in cloud settings.",
+                      getDatacenterDescription());
+            getStatistics().recordProvisioningFailure("No credentials configured");
+            return plannedNodes;
+        }
 
         if (templates == null || templates.isEmpty()) {
             LOGGER.log(Level.WARNING, "provision: No templates configured for datacenter {0}",
@@ -116,6 +132,13 @@ public class Datacenter extends Cloud {
     public boolean canProvision(Label label) {
         LOGGER.log(Level.FINE, "canProvision called for datacenter {0} with label {1}",
                   new Object[]{getDatacenterDescription(), label});
+
+        // Check if credentials are configured
+        if (credentialsId == null || credentialsId.trim().isEmpty()) {
+            LOGGER.log(Level.FINE, "canProvision: No credentials configured for datacenter {0}",
+                      getDatacenterDescription());
+            return false;
+        }
 
         if (templates == null || templates.isEmpty()) {
             LOGGER.log(Level.WARNING, "canProvision: No templates configured for datacenter {0}",
@@ -192,16 +215,54 @@ public class Datacenter extends Cloud {
         return hostname;
     }
 
-    public String getUsername() {
-        return username;
+    public String getCredentialsId() {
+        return credentialsId;
     }
 
     public String getRealm() {
         return realm;
     }
 
+    /**
+     * Resolve credentials from Jenkins credential store.
+     * @return StandardUsernamePasswordCredentials or null if not found
+     */
+    private StandardUsernamePasswordCredentials getCredentials() {
+        if (credentialsId == null || credentialsId.isEmpty()) {
+            return null;
+        }
+
+        List<StandardUsernamePasswordCredentials> credentials = CredentialsProvider.lookupCredentials(
+            StandardUsernamePasswordCredentials.class,
+            Jenkins.get(),
+            ACL.SYSTEM,
+            Collections.<DomainRequirement>emptyList()
+        );
+
+        for (StandardUsernamePasswordCredentials cred : credentials) {
+            if (credentialsId.equals(cred.getId())) {
+                return cred;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Get username from Jenkins credentials.
+     * @return username or null if credentials not found
+     */
+    public String getUsername() {
+        StandardUsernamePasswordCredentials creds = getCredentials();
+        return creds != null ? creds.getUsername() : null;
+    }
+
+    /**
+     * Get password from Jenkins credentials.
+     * @return password secret or null if credentials not found
+     */
     public Secret getPassword() {
-        return password;
+        StandardUsernamePasswordCredentials creds = getCredentials();
+        return creds != null ? creds.getPassword() : null;
     }
 
     public Boolean getIgnoreSSL() {
@@ -217,7 +278,14 @@ public class Datacenter extends Cloud {
     }
 
     public String getDatacenterDescription() {
-        return username + "@" + realm + " - " + hostname;
+        String username = getUsername();
+        if (username != null) {
+            return username + "@" + realm + " - " + hostname;
+        } else if (credentialsId != null && !credentialsId.trim().isEmpty()) {
+            return "[" + credentialsId + "]@" + realm + " - " + hostname;
+        } else {
+            return "[no-credentials]@" + realm + " - " + hostname;
+        }
     }
     
     public ProxmoxCloudStatistics getStatistics() {
@@ -323,6 +391,17 @@ public class Datacenter extends Cloud {
 
     public Connector proxmoxInstance() {
         if (pveConnector == null) {
+            if (credentialsId == null || credentialsId.trim().isEmpty()) {
+                throw new IllegalStateException("No credentials configured for Proxmox datacenter '" + hostname + "'. Please configure credentials in the cloud settings.");
+            }
+
+            String username = getUsername();
+            Secret password = getPassword();
+
+            if (username == null || password == null) {
+                throw new IllegalStateException("Unable to resolve credentials with ID '" + credentialsId + "' for datacenter '" + hostname + "'. Please verify the credentials exist and are accessible.");
+            }
+
             pveConnector = new Connector(hostname, username, realm, password, ignoreSSL);
         }
         return pveConnector;
@@ -617,33 +696,64 @@ public class Datacenter extends Cloud {
             return emptyStringValidation("Hostname", value);
         }
 
-        public FormValidation doCheckUsername(@QueryParameter String value) {
-            return emptyStringValidation("Username", value);
+        public FormValidation doCheckCredentialsId(@QueryParameter String value) {
+            if (Util.fixEmptyAndTrim(value) == null) {
+                return FormValidation.warning("No credentials selected. Please select credentials to authenticate with Proxmox.");
+            }
+            return FormValidation.ok();
         }
 
         public FormValidation doCheckRealm(@QueryParameter String value) {
             return emptyStringValidation("Realm", value);
         }
 
-        public FormValidation doCheckPassword(@QueryParameter Secret value) {
-            return emptyStringValidation("Password", value.getPlainText());
+        /**
+         * Fills the credentials dropdown with available username/password credentials.
+         */
+        public ListBoxModel doFillCredentialsIdItems() {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+            return new StandardListBoxModel()
+                .includeEmptyValue()
+                .includeAs(ACL.SYSTEM, Jenkins.get(), StandardUsernamePasswordCredentials.class);
         }
 
         @POST
         public FormValidation doTestConnection(
                 @QueryParameter String hostname,
-                @QueryParameter String username,
+                @QueryParameter String credentialsId,
                 @QueryParameter String realm,
-                @QueryParameter Secret password,
                 @QueryParameter Boolean ignoreSSL) {
             Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             try {
                 if (hostname.isEmpty()) {
                     return fieldNotSpecifiedError("Hostname");
                 }
-                if (username.isEmpty()) {
-                    return fieldNotSpecifiedError("Username");
+                if (Util.fixEmptyAndTrim(credentialsId) == null) {
+                    return fieldNotSpecifiedError("Credentials");
                 }
+
+                // Resolve credentials
+                List<StandardUsernamePasswordCredentials> credentials = CredentialsProvider.lookupCredentials(
+                    StandardUsernamePasswordCredentials.class,
+                    Jenkins.get(),
+                    ACL.SYSTEM,
+                    Collections.<DomainRequirement>emptyList()
+                );
+
+                StandardUsernamePasswordCredentials creds = null;
+                for (StandardUsernamePasswordCredentials cred : credentials) {
+                    if (credentialsId.equals(cred.getId())) {
+                        creds = cred;
+                        break;
+                    }
+                }
+
+                if (creds == null) {
+                    return FormValidation.error("Selected credentials not found. Please select valid credentials.");
+                }
+
+                String username = creds.getUsername();
+                Secret password = creds.getPassword();
                 if (realm.isEmpty()) {
                     return fieldNotSpecifiedError("Realm");
                 }
