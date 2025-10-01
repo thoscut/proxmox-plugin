@@ -1,0 +1,28 @@
+<div>
+    <p>
+        When enabled, automatically executes a command on each newly cloned VM using the Proxmox guest agent.
+    </p>
+    <p>
+        This is useful for performing initialization tasks after VM cloning, such as:
+    </p>
+    <ul>
+        <li>Setting up SSH keys or certificates</li>
+        <li>Configuring network settings</li>
+        <li>Installing or updating software</li>
+        <li>Running initialization scripts</li>
+        <li>Setting up monitoring agents</li>
+    </ul>
+    <p>
+        <strong>Requirements:</strong>
+    </p>
+    <ul>
+        <li>The VM must be started (enable "Start VM" option)</li>
+        <li>The Proxmox guest agent must be installed and running in the VM</li>
+        <li>The guest agent must be enabled in the VM configuration</li>
+    </ul>
+    <p>
+        <strong>Note:</strong> If the guest agent is not available or the command fails,
+        the VM will still be created as a Jenkins slave, but a warning will be logged.
+        Post-clone command failures do not prevent slave provisioning.
+    </p>
+</div>

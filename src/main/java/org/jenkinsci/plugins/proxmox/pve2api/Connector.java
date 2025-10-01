@@ -11,8 +11,10 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.security.auth.login.LoginException;
 import kong.unirest.HttpRequest;
+import kong.unirest.HttpRequestWithBody;
 import kong.unirest.HttpResponse;
 import kong.unirest.JsonNode;
+import kong.unirest.MultipartBody;
 import kong.unirest.Unirest;
 import kong.unirest.UnirestInstance;
 import kong.unirest.json.JSONArray;
@@ -448,6 +450,177 @@ public class Connector {
         } else {
             // Return success indicator for immediate deletions
             return "VM deletion completed";
+        }
+    }
+
+    /**
+     * Execute a command on a VM using the guest agent
+     * @param node The Proxmox node
+     * @param vmid The VM ID
+     * @param command The command to execute
+     * @return The task ID for the command execution
+     * @throws LoginException if authentication fails
+     */
+    public String executeGuestCommand(String node, Integer vmid, String command) throws LoginException {
+        JSONObject responseObj = null;
+
+        // Proxmox VE 8+ requires command to be passed as JSON array in the command parameter
+        // Based on QEMU guest agent and Proxmox documentation, we need proper Windows command format
+        String[] commandArray;
+        if (command.toLowerCase().startsWith("dir") || command.toLowerCase().contains(":\\") ||
+            command.toLowerCase().startsWith("powershell") || command.toLowerCase().startsWith("cmd") ||
+            command.toLowerCase().startsWith("type") || command.toLowerCase().startsWith("copy") ||
+            command.toLowerCase().startsWith("del") || command.toLowerCase().startsWith("move") ||
+            command.toLowerCase().startsWith("echo") || command.toLowerCase().startsWith("set") ||
+            command.toLowerCase().startsWith("ipconfig") || command.toLowerCase().startsWith("netstat")) {
+            // Windows command - use proper Windows guest agent format
+            if (command.toLowerCase().startsWith("powershell")) {
+                // PowerShell command - use full path and proper arguments
+                if (command.toLowerCase().startsWith("powershell.exe")) {
+                    // Already has .exe extension, split arguments
+                    String[] parts = command.split("\\s+", 2);
+                    if (parts.length == 2) {
+                        commandArray = new String[]{"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", parts[1]};
+                    } else {
+                        commandArray = new String[]{"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"};
+                    }
+                } else {
+                    // Remove "powershell" prefix and use proper path
+                    String psCommand = command.substring(10).trim(); // Remove "powershell "
+                    commandArray = new String[]{"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", psCommand};
+                }
+            } else if (command.toLowerCase().startsWith("cmd")) {
+                // cmd command - use full path and proper arguments
+                if (command.toLowerCase().startsWith("cmd.exe")) {
+                    // Already has .exe extension, split arguments
+                    String[] parts = command.split("\\s+", 2);
+                    if (parts.length == 2) {
+                        commandArray = new String[]{"C:\\Windows\\System32\\cmd.exe", "/c", parts[1]};
+                    } else {
+                        commandArray = new String[]{"C:\\Windows\\System32\\cmd.exe"};
+                    }
+                } else {
+                    // Remove "cmd" prefix and use proper path
+                    String cmdCommand = command.substring(3).trim(); // Remove "cmd "
+                    commandArray = new String[]{"C:\\Windows\\System32\\cmd.exe", "/c", cmdCommand};
+                }
+            } else {
+                // Regular Windows command like "dir c:\" - use the exact format that works in CLI
+                // Working CLI format: qm guest exec 5743 "c:\windows\system32\cmd.exe" "/c" "dir"
+                commandArray = new String[]{"C:\\Windows\\System32\\cmd.exe", "/c", command};
+            }
+        } else {
+            // Unix/Linux command - use shell
+            commandArray = new String[]{"/bin/sh", "-c", command};
+        }
+
+        // Build request with JSON array for command parameter (Proxmox VE 8+ format)
+        // The command must be passed as a JSON array: {"command": ["cmd", "arg1", "arg2"]}
+        kong.unirest.json.JSONArray jsonCommandArray = new kong.unirest.json.JSONArray();
+        for (String part : commandArray) {
+            jsonCommandArray.put(part);
+        }
+
+        // Debug logging to understand what we're sending
+        LOGGER.log(Level.INFO, "Executing guest command on VM {0}: Original command: {1}", new Object[]{vmid, command});
+        LOGGER.log(Level.INFO, "Command array: {0}", java.util.Arrays.toString(commandArray));
+        LOGGER.log(Level.INFO, "JSON command array: {0}", jsonCommandArray.toString());
+
+        // Create JSON body according to Proxmox 8 format
+        kong.unirest.json.JSONObject requestBody = new kong.unirest.json.JSONObject();
+        requestBody.put("command", jsonCommandArray);
+
+        LOGGER.log(Level.INFO, "Request body JSON: {0}", requestBody.toString());
+
+        HttpResponse<JsonNode> response = JSONResource(
+            unirest.post(baseURL + "/nodes/" + node + "/qemu/" + vmid + "/agent/exec")
+                .header("Content-Type", "application/json")
+                .body(requestBody.toString())
+        );
+
+        responseObj = response.getBody().getObject();
+
+        if (responseObj.has("errors")) {
+            throw new RuntimeException("Proxmox API error during guest command execution: " + responseObj.toString());
+        }
+
+        if (!responseObj.has("data") || responseObj.isNull("data")) {
+            // Check if there's a more specific error message
+            String errorMsg = "Proxmox API returned null data for guest command execution.";
+            if (responseObj.has("message")) {
+                errorMsg += " Message: " + responseObj.getString("message");
+            }
+            errorMsg += " Full response: " + responseObj.toString();
+            throw new RuntimeException(errorMsg);
+        }
+
+        // Handle different response formats - data can be string, number, or object
+        Object dataObj = responseObj.get("data");
+        LOGGER.log(Level.INFO, "Response data type: {0}, value: {1}", new Object[]{dataObj.getClass().getSimpleName(), dataObj.toString()});
+        if (dataObj instanceof String) {
+            return (String) dataObj;
+        } else if (dataObj instanceof Number) {
+            return dataObj.toString();
+        } else if (dataObj instanceof kong.unirest.json.JSONObject) {
+            // If data is an object, it might contain a pid field
+            kong.unirest.json.JSONObject dataJsonObj = (kong.unirest.json.JSONObject) dataObj;
+            if (dataJsonObj.has("pid")) {
+                return dataJsonObj.get("pid").toString();
+            } else {
+                return dataJsonObj.toString();
+            }
+        } else {
+            return dataObj.toString();
+        }
+    }
+
+    /**
+     * Get the status of a guest agent command execution
+     * @param node The Proxmox node
+     * @param vmid The VM ID
+     * @param pid The process ID returned from executeGuestCommand
+     * @return JSONObject containing command execution status and result
+     * @throws LoginException if authentication fails
+     */
+    public JSONObject getGuestCommandStatus(String node, Integer vmid, String pid) throws LoginException {
+        HttpResponse<JsonNode> response = JSONResource(
+            unirest.get(baseURL + "/nodes/" + node + "/qemu/" + vmid + "/agent/exec-status")
+                .queryString("pid", pid)
+        );
+
+        JSONObject responseObj = response.getBody().getObject();
+
+        if (responseObj.has("errors")) {
+            throw new RuntimeException("Proxmox API error during guest command status check: " + responseObj.toString());
+        }
+
+        if (!responseObj.has("data") || responseObj.isNull("data")) {
+            throw new RuntimeException("Proxmox API returned null data for guest command status. Response: " + responseObj.toString());
+        }
+
+        return responseObj.getJSONObject("data");
+    }
+
+    /**
+     * Check if the guest agent is available on the VM
+     * @param node The Proxmox node
+     * @param vmid The VM ID
+     * @return true if guest agent is available, false otherwise
+     * @throws LoginException if authentication fails
+     */
+    public boolean isGuestAgentAvailable(String node, Integer vmid) throws LoginException {
+        try {
+            HttpResponse<JsonNode> response = JSONResource(
+                unirest.get(baseURL + "/nodes/" + node + "/qemu/" + vmid + "/agent/ping")
+            );
+
+            JSONObject responseObj = response.getBody().getObject();
+
+            // If we get a successful response, the agent is available
+            return !responseObj.has("errors");
+        } catch (Exception e) {
+            // If any exception occurs, assume agent is not available
+            return false;
         }
     }
 

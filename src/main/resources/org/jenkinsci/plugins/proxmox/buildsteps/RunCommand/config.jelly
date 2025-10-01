@@ -1,0 +1,37 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:d="jelly:define" xmlns:l="/lib/layout" xmlns:t="/lib/hudson" xmlns:f="/lib/form">
+
+    <f:entry title="${%Datacenter}" field="datacenterDescription">
+        <f:select />
+    </f:entry>
+
+    <f:entry title="${%Node}" field="datacenterNode">
+        <f:select />
+    </f:entry>
+
+    <f:entry title="${%VM ID}" field="vmId">
+        <f:textbox />
+    </f:entry>
+
+    <f:entry title="${%Command}" field="command" help="/plugin/proxmox/help-runcommand-command.html">
+        <f:textarea cols="80" rows="5" />
+    </f:entry>
+
+    <f:advanced>
+        <f:entry title="${%Timeout (seconds)}" field="timeoutSeconds" help="/plugin/proxmox/help-runcommand-timeout.html">
+            <f:number default="300" clazz="number" min="1" max="3600" step="1"/>
+        </f:entry>
+
+        <f:entry title="${%Wait for completion}" field="waitForCompletion" help="/plugin/proxmox/help-runcommand-wait.html">
+            <f:checkbox default="true" />
+        </f:entry>
+
+        <f:entry title="${%Fail build on command error}" field="failOnError" help="/plugin/proxmox/help-runcommand-failonerror.html">
+            <f:checkbox default="true" />
+        </f:entry>
+    </f:advanced>
+
+    <f:validateButton title="${%Test Guest Agent}" progress="${%Testing...}" method="testGuestAgent"
+                      with="datacenterDescription,datacenterNode,vmId"/>
+
+</j:jelly>

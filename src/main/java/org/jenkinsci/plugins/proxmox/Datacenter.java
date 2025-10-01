@@ -75,21 +75,21 @@ public class Datacenter extends Cloud {
     }
 
     public Collection<NodeProvisioner.PlannedNode> provision(Label label, int excessWorkload) {
-        LOGGER.log(Level.INFO, "provision called for datacenter {0} with label {1} and excessWorkload {2}",
+        LOGGER.log(Level.INFO, "Provision called for datacenter {0} with label {1} and excessWorkload {2}",
                   new Object[]{getDatacenterDescription(), label, excessWorkload});
 
         List<NodeProvisioner.PlannedNode> plannedNodes = new ArrayList<>();
 
         // Check if credentials are configured
         if (credentialsId == null || credentialsId.trim().isEmpty()) {
-            LOGGER.log(Level.SEVERE, "provision: No credentials configured for datacenter {0}. Please configure credentials in cloud settings.",
+            LOGGER.log(Level.SEVERE, "Provision: No credentials configured for datacenter {0}. Please configure credentials in cloud settings.",
                       getDatacenterDescription());
             getStatistics().recordProvisioningFailure("No credentials configured");
             return plannedNodes;
         }
 
         if (templates == null || templates.isEmpty()) {
-            LOGGER.log(Level.WARNING, "provision: No templates configured for datacenter {0}",
+            LOGGER.log(Level.WARNING, "Provision: No templates configured for datacenter {0}",
                       getDatacenterDescription());
             return plannedNodes;
         }

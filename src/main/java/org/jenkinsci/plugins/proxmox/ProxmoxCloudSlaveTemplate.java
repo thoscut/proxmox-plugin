@@ -55,7 +55,10 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
     private final ComputerLauncher launcher;
     private final RetentionStrategy<?> retentionStrategy;
     private final List<? extends NodeProperty<?>> nodeProperties;
-    
+    private final String postCloneCommand;
+    private final int postCloneCommandTimeout;
+    private final boolean runPostCloneCommand;
+
     private transient Set<LabelAtom> labelSet;
     private transient AtomicInteger currentlyProvisioning = new AtomicInteger(0);
 
@@ -74,7 +77,10 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
                                    int startupWaitingPeriodSeconds,
                                    ComputerLauncher launcher,
                                    RetentionStrategy<?> retentionStrategy,
-                                   List<? extends NodeProperty<?>> nodeProperties) {
+                                   List<? extends NodeProperty<?>> nodeProperties,
+                                   String postCloneCommand,
+                                   int postCloneCommandTimeout,
+                                   boolean runPostCloneCommand) {
         this.templateName = templateName;
         this.labels = labels;
         this.remoteFS = remoteFS;
@@ -90,6 +96,9 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
         this.launcher = launcher;
         this.retentionStrategy = retentionStrategy;
         this.nodeProperties = nodeProperties;
+        this.postCloneCommand = postCloneCommand;
+        this.postCloneCommandTimeout = postCloneCommandTimeout > 0 ? postCloneCommandTimeout : 300;
+        this.runPostCloneCommand = runPostCloneCommand;
     }
 
     public boolean canProvision(Label label) {
@@ -133,6 +142,11 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
             
             if (startVM) {
                 startClonedVm(proxmoxApi, clonedVmId, cloneName);
+            }
+
+            // Execute post-clone command if configured
+            if (runPostCloneCommand && postCloneCommand != null && !postCloneCommand.trim().isEmpty()) {
+                executePostCloneCommand(proxmoxApi, clonedVmId, cloneName);
             }
 
             VirtualMachineSlave slave = new VirtualMachineSlave(
@@ -493,6 +507,97 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
         return this;
     }
 
+    /**
+     * Execute the post-clone command on the newly cloned VM using guest agent
+     */
+    private void executePostCloneCommand(Connector proxmoxApi, Integer vmId, String vmName) {
+        LOGGER.log(Level.INFO, "Executing post-clone command on VM {0} (ID: {1})", new Object[]{vmName, vmId});
+        LOGGER.log(Level.INFO, "Command: {0}", postCloneCommand);
+
+        try {
+            // Check if guest agent is available
+            if (!proxmoxApi.isGuestAgentAvailable(datacenterNode, vmId)) {
+                LOGGER.log(Level.WARNING, "Guest agent not available on VM {0}. Skipping post-clone command execution.", vmName);
+                return;
+            }
+
+            // Execute the command
+            String pid = proxmoxApi.executeGuestCommand(datacenterNode, vmId, postCloneCommand);
+            LOGGER.log(Level.INFO, "Post-clone command started with PID: {0}", pid);
+
+            // Wait for command completion
+            LOGGER.log(Level.INFO, "Waiting for post-clone command completion (timeout: {0} seconds)", postCloneCommandTimeout);
+
+            long startTime = System.currentTimeMillis();
+            long timeoutMs = postCloneCommandTimeout * 1000L;
+            JSONObject status = null;
+            boolean completed = false;
+
+            while (!completed && (System.currentTimeMillis() - startTime) < timeoutMs) {
+                Thread.sleep(2000); // Check every 2 seconds
+
+                status = proxmoxApi.getGuestCommandStatus(datacenterNode, vmId, pid);
+                LOGGER.log(Level.INFO, "Command status response: {0}", status.toString());
+
+                // Handle different formats for the 'exited' field
+                if (status.has("exited")) {
+                    Object exitedObj = status.get("exited");
+                    boolean hasExited = false;
+
+                    if (exitedObj instanceof Boolean) {
+                        hasExited = (Boolean) exitedObj;
+                    } else if (exitedObj instanceof Number) {
+                        hasExited = ((Number) exitedObj).intValue() != 0;
+                    } else if (exitedObj instanceof String) {
+                        String exitedStr = (String) exitedObj;
+                        hasExited = "true".equalsIgnoreCase(exitedStr) || "1".equals(exitedStr);
+                    }
+
+                    if (hasExited) {
+                        completed = true;
+                        LOGGER.log(Level.INFO, "Post-clone command completed on VM {0}", vmName);
+                    } else {
+                        LOGGER.log(Level.FINE, "Post-clone command still running on VM {0}...", vmName);
+                    }
+                } else {
+                    LOGGER.log(Level.FINE, "Post-clone command status does not contain 'exited' field for VM {0}...", vmName);
+                }
+            }
+
+            if (!completed) {
+                LOGGER.log(Level.WARNING, "Post-clone command timed out after {0} seconds on VM {1}",
+                          new Object[]{postCloneCommandTimeout, vmName});
+                return;
+            }
+
+            // Process results
+            int exitCode = status.optInt("exitcode", -1);
+            String stdout = status.optString("out-data", "");
+            String stderr = status.optString("err-data", "");
+
+            LOGGER.log(Level.INFO, "Post-clone command completed on VM {0} with exit code: {1}",
+                      new Object[]{vmName, exitCode});
+
+            if (!stdout.isEmpty()) {
+                LOGGER.log(Level.INFO, "Post-clone command STDOUT from VM {0}: {1}", new Object[]{vmName, stdout});
+            }
+
+            if (!stderr.isEmpty() && exitCode != 0) {
+                LOGGER.log(Level.WARNING, "Post-clone command STDERR from VM {0}: {1}", new Object[]{vmName, stderr});
+            }
+
+            if (exitCode != 0) {
+                LOGGER.log(Level.WARNING, "Post-clone command failed on VM {0} with exit code: {1}",
+                          new Object[]{vmName, exitCode});
+            } else {
+                LOGGER.log(Level.INFO, "Post-clone command executed successfully on VM {0}", vmName);
+            }
+
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "Failed to execute post-clone command on VM " + vmName + ": " + e.getMessage(), e);
+        }
+    }
+
     public String getTemplateName() { return templateName; }
     public String getLabels() { return labels; }
     public String getRemoteFS() { return remoteFS; }
@@ -508,6 +613,9 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
     public ComputerLauncher getLauncher() { return launcher; }
     public RetentionStrategy<?> getRetentionStrategy() { return retentionStrategy; }
     public List<? extends NodeProperty<?>> getNodeProperties() { return nodeProperties; }
+    public String getPostCloneCommand() { return postCloneCommand; }
+    public int getPostCloneCommandTimeout() { return postCloneCommandTimeout; }
+    public boolean getRunPostCloneCommand() { return runPostCloneCommand; }
 
     @Extension
     public static class DescriptorImpl extends Descriptor<ProxmoxCloudSlaveTemplate> {

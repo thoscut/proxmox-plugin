@@ -1,0 +1,22 @@
+<div>
+    <p>
+        Maximum time in seconds to wait for the command to complete.
+    </p>
+    <p>
+        This setting only applies when "Wait for completion" is enabled. If the command
+        takes longer than the specified timeout, the build step will be marked as failed
+        (unless "Fail build on command error" is disabled).
+    </p>
+    <p>
+        <strong>Default:</strong> 300 seconds (5 minutes)<br>
+        <strong>Range:</strong> 1 to 3600 seconds (1 hour)
+    </p>
+    <p>
+        Consider the nature of your command when setting the timeout:
+    </p>
+    <ul>
+        <li>Quick commands (file operations, service restarts): 30-60 seconds</li>
+        <li>Package installations: 300-600 seconds</li>
+        <li>System updates or compilations: 900-3600 seconds</li>
+    </ul>
+</div>
