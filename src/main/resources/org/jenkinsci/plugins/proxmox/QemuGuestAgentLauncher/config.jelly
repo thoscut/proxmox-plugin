@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form">
+
+    <f:entry title="Use WebSocket" field="useWebSocket">
+        <f:checkbox default="true" />
+    </f:entry>
+
+    <f:entry title="Work Directory" field="workDir">
+        <f:textbox default="" />
+    </f:entry>
+
+    <f:entry title="Agent Command" field="agentCommand">
+        <f:textarea cols="80" rows="4" />
+    </f:entry>
+
+    <f:entry title="Connection Timeout (seconds)" field="connectionTimeoutSeconds">
+        <f:number default="60" min="1" max="600" />
+    </f:entry>
+
+    <f:entry title="Maximum Retries" field="maxRetries">
+        <f:number default="3" min="1" max="10" />
+    </f:entry>
+
+    <f:entry title="Wait for Agent Ready" field="waitForAgentReady">
+        <f:checkbox default="true" />
+    </f:entry>
+
+</j:jelly>

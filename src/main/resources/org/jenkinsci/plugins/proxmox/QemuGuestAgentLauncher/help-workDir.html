@@ -1,0 +1,20 @@
+<div>
+    <p>
+        Specify the working directory for the Jenkins agent on the VM.
+    </p>
+    <p>
+        This directory will be used by the agent to store temporary files, logs, and workspace data.
+        Leave empty to use the agent's default working directory.
+    </p>
+    <p>
+        <strong>Examples:</strong>
+    </p>
+    <ul>
+        <li>Windows: <code>C:\jenkins\workspace</code></li>
+        <li>Linux: <code>/var/jenkins/workspace</code></li>
+    </ul>
+    <p>
+        <strong>Note:</strong> This setting only applies when using the default agent command.
+        If you specify a custom agent command, you need to manually add the <code>-workDir</code> parameter.
+    </p>
+</div>

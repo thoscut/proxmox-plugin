@@ -505,9 +505,10 @@ public class Connector {
                     commandArray = new String[]{"C:\\Windows\\System32\\cmd.exe", "/c", cmdCommand};
                 }
             } else {
-                // Regular Windows command like "dir c:\" - use the exact format that works in CLI
+                // Regular Windows command like "dir c:\" - fix Windows command syntax issues
                 // Working CLI format: qm guest exec 5743 "c:\windows\system32\cmd.exe" "/c" "dir"
-                commandArray = new String[]{"C:\\Windows\\System32\\cmd.exe", "/c", command};
+                String sanitizedCommand = sanitizeWindowsCommand(command);
+                commandArray = new String[]{"C:\\Windows\\System32\\cmd.exe", "/c", sanitizedCommand};
             }
         } else {
             // Unix/Linux command - use shell
@@ -622,6 +623,28 @@ public class Connector {
             // If any exception occurs, assume agent is not available
             return false;
         }
+    }
+
+    private String sanitizeWindowsCommand(String command) {
+        if (command == null || command.trim().isEmpty()) {
+            return command;
+        }
+
+        String sanitized = command.trim();
+
+        // Fix common Windows command issues that cause syntax errors
+        if (sanitized.matches("^dir\\s+[a-zA-Z]:\\\\?$")) {
+            // Pattern like "dir c:\" or "dir c:" - remove trailing backslash if present
+            sanitized = sanitized.replaceAll("\\\\+$", "");
+        }
+
+        // Handle other problematic trailing backslashes in file paths
+        if (sanitized.endsWith("\\") && !sanitized.endsWith("\\\\")) {
+            // Single trailing backslash (not escaped) can cause issues
+            sanitized = sanitized.substring(0, sanitized.length() - 1);
+        }
+
+        return sanitized;
     }
 
     protected void finalize() {

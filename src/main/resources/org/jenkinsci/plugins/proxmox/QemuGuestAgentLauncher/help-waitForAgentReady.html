@@ -1,0 +1,18 @@
+<div>
+    <p>
+        When enabled, the launcher will wait for the Jenkins agent to connect back to the master after executing the startup command.
+    </p>
+    <p>
+        <strong>Enabled (recommended):</strong> The launcher will monitor the agent connection status and report when the agent is ready to accept builds.
+        This provides better feedback and ensures the agent is properly connected before marking the launch as successful.
+    </p>
+    <p>
+        <strong>Disabled:</strong> The launcher will only execute the agent command and immediately consider the launch successful,
+        regardless of whether the agent actually connects. Use this option if you have custom connection monitoring or
+        if the agent takes a very long time to start.
+    </p>
+    <p>
+        <strong>Note:</strong> Even when enabled, if the agent doesn't connect within the timeout period,
+        only a warning is logged and the launch process continues normally.
+    </p>
+</div>
