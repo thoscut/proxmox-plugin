@@ -72,6 +72,17 @@ public class VirtualMachineSlaveComputer extends SlaveComputer {
             final VirtualMachineSlave slave = (VirtualMachineSlave) node;
             final VirtualMachineLauncher launcher = (VirtualMachineLauncher) slave.getLauncher();
 
+            // Increment limited builds counter if configured
+            if (slave.getLimitedBuildsCount() > 0) {
+                slave.incrementBuildsExecuted();
+                int executed = slave.getBuildsExecuted();
+                int limit = slave.getLimitedBuildsCount();
+                getListener().getLogger().println("INFO: Build " + executed + " of " + limit + " completed on this agent");
+                if (executed >= limit) {
+                    getListener().getLogger().println("INFO: Limited builds threshold reached, agent will disconnect");
+                }
+            }
+
             if (launcher.isLaunchSupported()
                     && (slave.getRevertPolicy() == VirtualMachineLauncher.RevertPolicy.AFTER_JOB)) {
                 performSnapshotRevert(slave, launcher, "after job");

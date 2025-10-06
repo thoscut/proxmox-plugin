@@ -37,6 +37,8 @@ public class VirtualMachineSlave extends Slave {
     private Boolean startVM;
     private int startupWaitingPeriodSeconds;
     private RevertPolicy revertPolicy;
+    private transient int limitedBuildsCount = 0;
+    private transient int buildsExecuted = 0;
 
     @DataBoundConstructor
     public VirtualMachineSlave(
@@ -114,6 +116,36 @@ public class VirtualMachineSlave extends Slave {
 
     public ComputerLauncher getDelegateLauncher() {
         return ((VirtualMachineLauncher) getLauncher()).getLauncher();
+    }
+
+    public void setLimitedBuildsCount(int count) {
+        this.limitedBuildsCount = count;
+    }
+
+    public int getLimitedBuildsCount() {
+        return limitedBuildsCount;
+    }
+
+    public int getBuildsExecuted() {
+        return buildsExecuted;
+    }
+
+    public void incrementBuildsExecuted() {
+        buildsExecuted++;
+        if (limitedBuildsCount > 0 && buildsExecuted >= limitedBuildsCount) {
+            try {
+                Computer computer = toComputer();
+                if (computer != null) {
+                    computer.setTemporarilyOffline(true,
+                        new hudson.slaves.OfflineCause.UserCause(hudson.model.User.getUnknown(),
+                            "Disconnected after " + limitedBuildsCount + " builds"));
+                }
+            } catch (Exception e) {
+                // Log but don't fail the build
+                java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName())
+                    .log(java.util.logging.Level.WARNING, "Failed to disconnect agent after limited builds", e);
+            }
+        }
     }
 
     @Override
