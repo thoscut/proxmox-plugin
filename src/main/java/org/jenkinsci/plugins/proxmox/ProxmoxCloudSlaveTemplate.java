@@ -364,7 +364,7 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
             String exitStatus = taskResult.has("exitstatus") ? taskResult.getString("exitstatus") : null;
 
             // Debug logging to understand the exact values
-            LOGGER.log(Level.INFO, "DEBUG: Clone task result for VM {0} - finalStatus='{1}', exitStatus='{2}', has_exitstatus={3}",
+            LOGGER.log(Level.FINE, "DEBUG: Clone task result for VM {0} - finalStatus='{1}', exitStatus='{2}', has_exitstatus={3}",
                       new Object[]{cloneName, finalStatus, exitStatus, taskResult.has("exitstatus")});
 
             // Proxmox tasks can have status "stopped" with exitstatus "OK" for success
@@ -372,7 +372,7 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
             boolean isSuccess = "OK".equals(finalStatus) ||
                                ("stopped".equals(finalStatus) && "OK".equals(exitStatus));
 
-            LOGGER.log(Level.INFO, "DEBUG: Success evaluation for VM {0} - isSuccess={1}, condition1={2}, condition2={3}",
+            LOGGER.log(Level.FINE, "DEBUG: Success evaluation for VM {0} - isSuccess={1}, condition1={2}, condition2={3}",
                       new Object[]{cloneName, isSuccess, "OK".equals(finalStatus),
                                   ("stopped".equals(finalStatus) && "OK".equals(exitStatus))});
 
