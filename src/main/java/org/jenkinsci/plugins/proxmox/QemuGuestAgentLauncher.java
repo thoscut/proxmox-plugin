@@ -35,9 +35,11 @@ public class QemuGuestAgentLauncher extends JNLPLauncher {
     private final boolean useWebSocket;
     private final String workDir;
     private final boolean curlSslNoRevoke;
+    private final boolean useDirect;
+    private final boolean useInstanceIdentity;
 
     @DataBoundConstructor
-    public QemuGuestAgentLauncher(String agentCommand, int connectionTimeoutSeconds, int maxRetries, boolean waitForAgentReady, boolean useWebSocket, String workDir, boolean curlSslNoRevoke) {
+    public QemuGuestAgentLauncher(String agentCommand, int connectionTimeoutSeconds, int maxRetries, boolean waitForAgentReady, boolean useWebSocket, String workDir, boolean curlSslNoRevoke, boolean useDirect, boolean useInstanceIdentity) {
         this.agentCommand = agentCommand;
         this.connectionTimeoutSeconds = connectionTimeoutSeconds > 0 ? connectionTimeoutSeconds : 60;
         this.maxRetries = maxRetries > 0 ? maxRetries : 3;
@@ -45,6 +47,8 @@ public class QemuGuestAgentLauncher extends JNLPLauncher {
         this.useWebSocket = useWebSocket;
         this.workDir = workDir;
         this.curlSslNoRevoke = curlSslNoRevoke;
+        this.useDirect = useDirect;
+        this.useInstanceIdentity = useInstanceIdentity;
     }
 
     private String getDefaultAgentCommand() {
@@ -86,6 +90,13 @@ public class QemuGuestAgentLauncher extends JNLPLauncher {
         if (useWebSocket) {
             cmd.append(" -webSocket");
         }
+        if (useDirect) {
+            cmd.append(" -direct {JENKINS_URL}");
+            // When using -direct, -instanceIdentity is required
+            cmd.append(" -instanceIdentity instance-identity");
+        } else if (useInstanceIdentity) {
+            cmd.append(" -instanceIdentity instance-identity");
+        }
         if (workDir != null && !workDir.trim().isEmpty()) {
             cmd.append(" -workDir ").append(workDir);
         }
@@ -113,6 +124,13 @@ public class QemuGuestAgentLauncher extends JNLPLauncher {
 
         if (useWebSocket) {
             cmd.append(" -webSocket");
+        }
+        if (useDirect) {
+            cmd.append(" -direct {JENKINS_URL}");
+            // When using -direct, -instanceIdentity is required
+            cmd.append(" -instanceIdentity instance-identity");
+        } else if (useInstanceIdentity) {
+            cmd.append(" -instanceIdentity instance-identity");
         }
         if (workDir != null && !workDir.trim().isEmpty()) {
             cmd.append(" -workDir ").append(workDir);
@@ -146,6 +164,14 @@ public class QemuGuestAgentLauncher extends JNLPLauncher {
 
     public boolean getCurlSslNoRevoke() {
         return curlSslNoRevoke;
+    }
+
+    public boolean getUseDirect() {
+        return useDirect;
+    }
+
+    public boolean getUseInstanceIdentity() {
+        return useInstanceIdentity;
     }
 
     @Override
@@ -200,6 +226,11 @@ public class QemuGuestAgentLauncher extends JNLPLauncher {
         command = command.replace("{COMPUTER_NAME}", computer.getName());
         command = command.replace("{SECRET}", computer.getJnlpMac());
         command = command.replace("{VM_ID}", slave.getVirtualMachineId().toString());
+
+        // Replace instance identity placeholder
+        // Note: Instance identity should be provided in custom command if needed
+        // The placeholder is left as-is for users to replace or configure externally
+        // command = command.replace("{INSTANCE_IDENTITY}", "");
 
         return command;
     }
