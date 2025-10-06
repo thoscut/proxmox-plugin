@@ -79,7 +79,7 @@ public class VirtualMachineSlaveComputer extends SlaveComputer {
                 int limit = slave.getLimitedBuildsCount();
                 getListener().getLogger().println("INFO: Build " + executed + " of " + limit + " completed on this agent");
                 if (executed >= limit) {
-                    getListener().getLogger().println("INFO: Limited builds threshold reached, agent will disconnect");
+                    getListener().getLogger().println("INFO: Limited builds threshold reached, agent will be deprovisioned");
                 }
             }
 

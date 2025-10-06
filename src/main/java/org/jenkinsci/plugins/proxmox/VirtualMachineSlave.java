@@ -134,16 +134,17 @@ public class VirtualMachineSlave extends Slave {
         buildsExecuted++;
         if (limitedBuildsCount > 0 && buildsExecuted >= limitedBuildsCount) {
             try {
-                Computer computer = toComputer();
-                if (computer != null) {
-                    computer.setTemporarilyOffline(true,
-                        new hudson.slaves.OfflineCause.UserCause(hudson.model.User.getUnknown(),
-                            "Disconnected after " + limitedBuildsCount + " builds"));
-                }
+                // Remove the node from Jenkins after limited builds reached
+                Jenkins jenkins = Jenkins.get();
+                jenkins.removeNode(this);
+                java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName())
+                    .log(java.util.logging.Level.INFO,
+                        "Agent {0} deprovisioned after {1} builds",
+                        new Object[]{getNodeName(), limitedBuildsCount});
             } catch (Exception e) {
                 // Log but don't fail the build
                 java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName())
-                    .log(java.util.logging.Level.WARNING, "Failed to disconnect agent after limited builds", e);
+                    .log(java.util.logging.Level.WARNING, "Failed to deprovision agent after limited builds", e);
             }
         }
     }
