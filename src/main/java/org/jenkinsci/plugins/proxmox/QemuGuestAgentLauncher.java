@@ -34,15 +34,17 @@ public class QemuGuestAgentLauncher extends JNLPLauncher {
     private final boolean waitForAgentReady;
     private final boolean useWebSocket;
     private final String workDir;
+    private final boolean curlSslNoRevoke;
 
     @DataBoundConstructor
-    public QemuGuestAgentLauncher(String agentCommand, int connectionTimeoutSeconds, int maxRetries, boolean waitForAgentReady, boolean useWebSocket, String workDir) {
+    public QemuGuestAgentLauncher(String agentCommand, int connectionTimeoutSeconds, int maxRetries, boolean waitForAgentReady, boolean useWebSocket, String workDir, boolean curlSslNoRevoke) {
         this.agentCommand = agentCommand;
         this.connectionTimeoutSeconds = connectionTimeoutSeconds > 0 ? connectionTimeoutSeconds : 60;
         this.maxRetries = maxRetries > 0 ? maxRetries : 3;
         this.waitForAgentReady = waitForAgentReady;
         this.useWebSocket = useWebSocket;
         this.workDir = workDir;
+        this.curlSslNoRevoke = curlSslNoRevoke;
     }
 
     private String getDefaultAgentCommand() {
@@ -72,7 +74,11 @@ public class QemuGuestAgentLauncher extends JNLPLauncher {
         cmd.append("printf '%s' {SECRET} > secret-file && ");
 
         // Download agent.jar from Jenkins
-        cmd.append("curl -sO {JENKINS_URL}jnlpJars/agent.jar && ");
+        cmd.append("curl -sO");
+        if (curlSslNoRevoke) {
+            cmd.append(" --ssl-no-revoke");
+        }
+        cmd.append(" {JENKINS_URL}jnlpJars/agent.jar && ");
 
         // Run the agent with secret from file
         cmd.append("java -jar agent.jar -url {JENKINS_URL} -secret @secret-file -name {COMPUTER_NAME}");
@@ -96,7 +102,11 @@ public class QemuGuestAgentLauncher extends JNLPLauncher {
         cmd.append("echo {SECRET} > secret-file & ");
 
         // Download agent.jar from Jenkins (use curl.exe on Windows)
-        cmd.append("curl.exe -sO {JENKINS_URL}jnlpJars/agent.jar & ");
+        cmd.append("curl.exe -sO");
+        if (curlSslNoRevoke) {
+            cmd.append(" --ssl-no-revoke");
+        }
+        cmd.append(" {JENKINS_URL}jnlpJars/agent.jar & ");
 
         // Run the agent with secret from file
         cmd.append("java -jar agent.jar -url {JENKINS_URL} -secret @secret-file -name {COMPUTER_NAME}");
@@ -132,6 +142,10 @@ public class QemuGuestAgentLauncher extends JNLPLauncher {
 
     public String getWorkDir() {
         return workDir;
+    }
+
+    public boolean getCurlSslNoRevoke() {
+        return curlSslNoRevoke;
     }
 
     @Override

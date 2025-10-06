@@ -10,6 +10,10 @@
         <f:textbox default="" />
     </f:entry>
 
+    <f:entry title="Curl SSL No Revoke" field="curlSslNoRevoke">
+        <f:checkbox default="false" />
+    </f:entry>
+
     <f:entry title="Agent Command" field="agentCommand">
         <f:textarea cols="80" rows="4" />
     </f:entry>

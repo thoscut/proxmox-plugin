@@ -171,18 +171,17 @@ public class VirtualMachineSlave extends Slave {
                     }
                 }
 
-                // Disconnect the agent to close WebSocket connection before removing
+                // Close the channel before removing the node to prevent WebSocket timeout errors
                 Computer computer = toComputer();
-                if (computer != null) {
+                if (computer != null && computer.getChannel() != null) {
                     try {
-                        computer.disconnect(new hudson.slaves.OfflineCause.UserCause(hudson.model.User.getUnknown(),
-                            "Agent deprovisioned after limited builds"));
+                        computer.getChannel().close();
                         java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName())
-                            .log(java.util.logging.Level.INFO, "Agent " + getNodeName() + " disconnected before removal");
-                    } catch (Exception disconnectError) {
+                            .log(java.util.logging.Level.INFO, "Agent " + getNodeName() + " channel closed before removal");
+                    } catch (Exception channelCloseError) {
                         java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName())
                             .log(java.util.logging.Level.WARNING,
-                                "Failed to disconnect agent before removal: " + disconnectError.getMessage());
+                                "Failed to close channel before removal: " + channelCloseError.getMessage());
                     }
                 }
 
