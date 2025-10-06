@@ -179,18 +179,6 @@ public class VirtualMachineSlave extends Slave {
                             "Agent deprovisioned after limited builds"));
                         java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName())
                             .log(java.util.logging.Level.INFO, "Agent " + getNodeName() + " disconnected before removal");
-
-                        // Wait for the channel to actually close (give it up to 5 seconds)
-                        int waitCount = 0;
-                        while (waitCount < 50 && computer.getChannel() != null) {
-                            Thread.sleep(100);
-                            waitCount++;
-                        }
-                        if (computer.getChannel() == null) {
-                            java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName())
-                                .log(java.util.logging.Level.INFO, "Agent " + getNodeName() + " channel closed after " +
-                                    (waitCount * 100) + "ms");
-                        }
                     } catch (Exception disconnectError) {
                         java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName())
                             .log(java.util.logging.Level.WARNING,
