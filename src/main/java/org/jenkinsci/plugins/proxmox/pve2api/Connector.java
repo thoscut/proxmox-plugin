@@ -553,15 +553,16 @@ public class Connector {
         }
 
         // Debug logging to understand what we're sending
-        LOGGER.log(Level.INFO, "Executing guest command on VM {0}: Original command: {1}", new Object[]{vmid, command});
-        LOGGER.log(Level.INFO, "Command array: {0}", java.util.Arrays.toString(commandArray));
-        LOGGER.log(Level.INFO, "JSON command array: {0}", jsonCommandArray.toString());
+        LOGGER.log(Level.INFO, "Executing guest command on VM " + vmid);
+        LOGGER.log(Level.FINE, "Original command: " + command);
+        LOGGER.log(Level.FINE, "Command array: {0}", java.util.Arrays.toString(commandArray));
+        LOGGER.log(Level.FINE, "JSON command array: {0}", jsonCommandArray.toString());
 
         // Create JSON body according to Proxmox 8 format
         kong.unirest.json.JSONObject requestBody = new kong.unirest.json.JSONObject();
         requestBody.put("command", jsonCommandArray);
 
-        LOGGER.log(Level.INFO, "Request body JSON: {0}", requestBody.toString());
+        LOGGER.log(Level.FINE, "Request body JSON: {0}", requestBody.toString());
 
         HttpResponse<JsonNode> response = JSONResource(
             unirest.post(baseURL + "/nodes/" + node + "/qemu/" + vmid + "/agent/exec")
@@ -587,7 +588,7 @@ public class Connector {
 
         // Handle different response formats - data can be string, number, or object
         Object dataObj = responseObj.get("data");
-        LOGGER.log(Level.INFO, "Response data type: {0}, value: {1}", new Object[]{dataObj.getClass().getSimpleName(), dataObj.toString()});
+        LOGGER.log(Level.FINE, "Response data type: {0}, value: {1}", new Object[]{dataObj.getClass().getSimpleName(), dataObj.toString()});
         if (dataObj instanceof String) {
             return (String) dataObj;
         } else if (dataObj instanceof Number) {

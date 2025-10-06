@@ -190,27 +190,47 @@ public class Datacenter extends Cloud {
                 // Create and provision the node
                 Node result = template.provision(Datacenter.this, plannedNodeName);
 
-                // Wait for the agent to connect before reporting provisioning as complete
+                // Add the node to Jenkins so we can monitor its connection status
                 if (result != null) {
+                    Jenkins.get().addNode(result);
+                    LOGGER.log(Level.INFO, "Node " + plannedNodeName + " added to Jenkins, waiting for connection...");
+
+                    // Wait for the agent to connect before reporting provisioning as complete
                     Computer computer = result.toComputer();
                     if (computer != null) {
-                        LOGGER.log(Level.FINE, "Waiting for agent {0} to connect...", plannedNodeName);
-
                         // Wait up to 5 minutes for the agent to connect
                         int maxWaitSeconds = 300;
                         int waitedSeconds = 0;
+                        boolean launcherInvoked = false;
+
                         while (waitedSeconds < maxWaitSeconds) {
-                            if (computer.isOnline()) {
-                                LOGGER.log(Level.INFO, "Agent {0} connected successfully after {1} seconds",
-                                    new Object[]{plannedNodeName, waitedSeconds});
+                            boolean isOnline = computer.isOnline();
+                            boolean isConnecting = computer.isConnecting();
+
+                            // Check if launcher has been invoked (either connecting or was already connected)
+                            if (!launcherInvoked && (isConnecting || isOnline)) {
+                                launcherInvoked = true;
+                                LOGGER.log(Level.INFO, "Agent " + plannedNodeName + " launcher has been invoked, connection in progress...");
+                            }
+
+                            // Log status every 10 seconds
+                            if (waitedSeconds % 10 == 0 || isOnline) {
+                                String status = isOnline ? "ONLINE" : (isConnecting ? "CONNECTING" : "OFFLINE");
+                                LOGGER.log(Level.INFO, "Agent " + plannedNodeName + " connection status after " +
+                                    waitedSeconds + " seconds: " + status);
+                            }
+
+                            if (isOnline) {
+                                LOGGER.log(Level.INFO, "Agent " + plannedNodeName + " connected successfully after " +
+                                    waitedSeconds + " seconds");
                                 break;
                             }
 
                             // Check if connection failed
                             if (computer.getOfflineCause() != null &&
                                 !(computer.getOfflineCause() instanceof hudson.slaves.OfflineCause.SimpleOfflineCause)) {
-                                LOGGER.log(Level.WARNING, "Agent {0} went offline during connection: {1}",
-                                    new Object[]{plannedNodeName, computer.getOfflineCause()});
+                                LOGGER.log(Level.WARNING, "Agent " + plannedNodeName + " went offline during connection: " +
+                                    computer.getOfflineCause());
                                 break;
                             }
 
@@ -219,9 +239,11 @@ public class Datacenter extends Cloud {
                         }
 
                         if (!computer.isOnline()) {
-                            LOGGER.log(Level.WARNING, "Agent {0} did not connect within {1} seconds",
-                                new Object[]{plannedNodeName, maxWaitSeconds});
+                            LOGGER.log(Level.WARNING, "Agent " + plannedNodeName + " did not connect within " +
+                                maxWaitSeconds + " seconds. Launcher invoked: " + launcherInvoked);
                         }
+                    } else {
+                        LOGGER.log(Level.WARNING, "Unable to get computer for node " + plannedNodeName);
                     }
                 }
 
