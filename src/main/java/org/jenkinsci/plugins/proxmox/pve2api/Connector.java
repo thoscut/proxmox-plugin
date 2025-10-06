@@ -476,43 +476,73 @@ public class Connector {
             // Windows command - use proper Windows guest agent format
             if (command.toLowerCase().startsWith("powershell")) {
                 // PowerShell command - use full path and proper arguments
+                // Split all space-separated parts into individual array elements
+                String psCommand;
                 if (command.toLowerCase().startsWith("powershell.exe")) {
-                    // Already has .exe extension, split arguments
-                    String[] parts = command.split("\\s+", 2);
-                    if (parts.length == 2) {
-                        commandArray = new String[]{"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", parts[1]};
-                    } else {
-                        commandArray = new String[]{"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"};
-                    }
+                    psCommand = command.substring(14).trim(); // Remove "powershell.exe "
                 } else {
-                    // Remove "powershell" prefix and use proper path
-                    String psCommand = command.substring(10).trim(); // Remove "powershell "
-                    commandArray = new String[]{"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-Command", psCommand};
+                    psCommand = command.substring(10).trim(); // Remove "powershell "
+                }
+
+                if (!psCommand.isEmpty()) {
+                    String[] parts = psCommand.split("\\s+");
+                    java.util.List<String> cmdList = new java.util.ArrayList<>();
+                    cmdList.add("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe");
+                    cmdList.add("--");
+                    for (String part : parts) {
+                        cmdList.add(part);
+                    }
+                    commandArray = cmdList.toArray(new String[0]);
+                } else {
+                    commandArray = new String[]{"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"};
                 }
             } else if (command.toLowerCase().startsWith("cmd")) {
-                // cmd command - use full path and proper arguments
+                // cmd command - split all space-separated parts into individual array elements
+                String cmdCommand;
                 if (command.toLowerCase().startsWith("cmd.exe")) {
-                    // Already has .exe extension, split arguments
-                    String[] parts = command.split("\\s+", 2);
-                    if (parts.length == 2) {
-                        commandArray = new String[]{"C:\\Windows\\System32\\cmd.exe", "/c", parts[1]};
-                    } else {
-                        commandArray = new String[]{"C:\\Windows\\System32\\cmd.exe"};
-                    }
+                    cmdCommand = command.substring(7).trim(); // Remove "cmd.exe "
                 } else {
-                    // Remove "cmd" prefix and use proper path
-                    String cmdCommand = command.substring(3).trim(); // Remove "cmd "
-                    commandArray = new String[]{"C:\\Windows\\System32\\cmd.exe", "/c", cmdCommand};
+                    cmdCommand = command.substring(3).trim(); // Remove "cmd "
+                }
+
+                if (!cmdCommand.isEmpty()) {
+                    String[] parts = cmdCommand.split("\\s+");
+                    java.util.List<String> cmdList = new java.util.ArrayList<>();
+                    cmdList.add("C:\\Windows\\System32\\cmd.exe");
+                    cmdList.add("--");
+                    for (String part : parts) {
+                        cmdList.add(part);
+                    }
+                    commandArray = cmdList.toArray(new String[0]);
+                } else {
+                    commandArray = new String[]{"C:\\Windows\\System32\\cmd.exe"};
                 }
             } else {
-                // Regular Windows command like "dir c:\" - fix Windows command syntax issues
-                // Working CLI format: qm guest exec 5743 "c:\windows\system32\cmd.exe" "/c" "dir"
+                // Regular Windows command - split all space-separated parts
+                // QEMU guest agent format: ["cmd.exe", "--", "/c", "arg1", "arg2", ...]
                 String sanitizedCommand = sanitizeWindowsCommand(command);
-                commandArray = new String[]{"C:\\Windows\\System32\\cmd.exe", "/c", sanitizedCommand};
+                String[] parts = sanitizedCommand.split("\\s+");
+                java.util.List<String> cmdList = new java.util.ArrayList<>();
+                cmdList.add("C:\\Windows\\System32\\cmd.exe");
+                cmdList.add("--");
+                cmdList.add("/c");
+                for (String part : parts) {
+                    cmdList.add(part);
+                }
+                commandArray = cmdList.toArray(new String[0]);
             }
         } else {
-            // Unix/Linux command - use shell
-            commandArray = new String[]{"/bin/sh", "-c", command};
+            // Unix/Linux command - split all space-separated parts
+            // QEMU guest agent format: ["/bin/sh", "--", "-c", "arg1", "arg2", ...]
+            String[] parts = command.split("\\s+");
+            java.util.List<String> cmdList = new java.util.ArrayList<>();
+            cmdList.add("/bin/sh");
+            cmdList.add("--");
+            cmdList.add("-c");
+            for (String part : parts) {
+                cmdList.add(part);
+            }
+            commandArray = cmdList.toArray(new String[0]);
         }
 
         // Build request with JSON array for command parameter (Proxmox VE 8+ format)

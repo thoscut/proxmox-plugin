@@ -46,13 +46,66 @@ public class QemuGuestAgentLauncher extends JNLPLauncher {
     }
 
     private String getDefaultAgentCommand() {
-        // Default command using modern format with configurable WebSocket
-        StringBuilder cmd = new StringBuilder("java -jar agent.jar -url {JENKINS_URL} -secret {SECRET} -name {COMPUTER_NAME}");
+        // Default command includes downloading agent.jar first, then running it
+        // This matches what Jenkins displays in the UI for inbound agents
+        // Uses a secret file instead of command line parameter for better security
+        //
+        // Note: The Connector.executeGuestCommand() automatically detects the OS based on
+        // command patterns and wraps the command appropriately:
+        // - Windows commands (starting with echo, dir, cmd, etc.) are wrapped with: cmd.exe /c "..."
+        // - Other commands are wrapped with: /bin/sh -c "..."
+        //
+        // By default, we generate Windows commands (starting with echo). For Unix/Linux VMs,
+        // provide a custom command via the agentCommand field that starts with Unix commands
+        // (printf, sh, bash, etc.) or the user can provide explicit OS-specific commands.
+        return getDefaultAgentCommandWindows();
+    }
+
+    private String getDefaultAgentCommandUnix() {
+        // Unix/Linux command using && operators
+        // IMPORTANT: Add spaces around operators so they split correctly into array elements
+        StringBuilder cmd = new StringBuilder();
+
+        // Create secret file first (more secure than passing secret on command line)
+        // Use printf instead of echo to avoid issues with special characters
+        // Add spaces around > and && for proper splitting
+        cmd.append("printf '%s' {SECRET} > secret-file && ");
+
+        // Download agent.jar from Jenkins
+        cmd.append("curl -sO {JENKINS_URL}jnlpJars/agent.jar && ");
+
+        // Run the agent with secret from file
+        cmd.append("java -jar agent.jar -url {JENKINS_URL} -secret @secret-file -name {COMPUTER_NAME}");
+
         if (useWebSocket) {
             cmd.append(" -webSocket");
         }
         if (workDir != null && !workDir.trim().isEmpty()) {
-            cmd.append(" -workDir \"").append(workDir).append("\"");
+            cmd.append(" -workDir ").append(workDir);
+        }
+        return cmd.toString();
+    }
+
+    private String getDefaultAgentCommandWindows() {
+        // Windows command using & operators
+        // IMPORTANT: Add spaces around operators so they split correctly into array elements
+        StringBuilder cmd = new StringBuilder();
+
+        // Create secret file first (more secure than passing secret on command line)
+        // Add spaces around > and & for proper splitting
+        cmd.append("echo {SECRET} > secret-file & ");
+
+        // Download agent.jar from Jenkins (use curl.exe on Windows)
+        cmd.append("curl.exe -sO {JENKINS_URL}jnlpJars/agent.jar & ");
+
+        // Run the agent with secret from file
+        cmd.append("java -jar agent.jar -url {JENKINS_URL} -secret @secret-file -name {COMPUTER_NAME}");
+
+        if (useWebSocket) {
+            cmd.append(" -webSocket");
+        }
+        if (workDir != null && !workDir.trim().isEmpty()) {
+            cmd.append(" -workDir ").append(workDir);
         }
         return cmd.toString();
     }

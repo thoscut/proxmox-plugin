@@ -1,0 +1,1 @@
+- Always use 'export JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-21.0.6.7-hotspot" && mvn clean package' for compiling for this project

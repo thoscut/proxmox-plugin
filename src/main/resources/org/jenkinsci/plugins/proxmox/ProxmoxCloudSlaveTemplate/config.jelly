@@ -67,18 +67,9 @@
         </f:entry>
     </f:advanced>
 
-    <f:dropdownList name="launcher" title="${%Launch method}" 
-                    help="/help/system-config/master-slave/launcher.html">
-        <j:forEach var="descriptor" items="${h.getComputerLauncherDescriptors()}">
-            <f:dropdownListBlock value="${descriptor.clazz.name}" name="${descriptor.displayName}"
-                               selected="${it.launcher.descriptor==descriptor}"
-                               title="${descriptor.displayName}">
-                <j:set var="instance" value="${it.launcher.descriptor==descriptor ? it.launcher : null}"/>
-                <f:class-entry descriptor="${descriptor}" />
-                <st:include from="${descriptor}" page="${descriptor.configPage}" optional="true"/>
-            </f:dropdownListBlock>
-        </j:forEach>
-    </f:dropdownList>
+    <f:entry title="${%Launch method}" help="/help/system-config/master-slave/launcher.html">
+        <f:hetero-radio field="launcher" descriptors="${h.getComputerLauncherDescriptors()}"/>
+    </f:entry>
 
     <f:entry title="${%Retention Strategy}" help="/help/system-config/master-slave/retention.html">
         <f:hetero-radio field="retentionStrategy" descriptors="${descriptor.retentionStrategyDescriptors}"/>
