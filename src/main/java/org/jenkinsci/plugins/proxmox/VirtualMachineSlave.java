@@ -134,11 +134,34 @@ public class VirtualMachineSlave extends Slave {
         buildsExecuted++;
         if (limitedBuildsCount > 0 && buildsExecuted >= limitedBuildsCount) {
             try {
-                // Delete the VM from Proxmox first
+                // Stop and delete the VM from Proxmox first
                 Datacenter datacenter = getDatacenterByDescriptionFromSlave(datacenterDescription);
                 if (datacenter != null && virtualMachineId != null && datacenterNode != null) {
                     try {
                         Connector pveApi = datacenter.proxmoxInstance();
+
+                        // Stop the VM first
+                        java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName())
+                            .log(java.util.logging.Level.INFO,
+                                "Stopping VM {0} before deletion",
+                                virtualMachineId);
+                        String stopTask = pveApi.stopQemuMachine(datacenterNode, virtualMachineId);
+
+                        // Wait for stop task to complete
+                        try {
+                            JSONObject stopResult = pveApi.waitForTaskToFinish(datacenterNode, stopTask);
+                            String stopStatus = stopResult.getString("status");
+                            java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName())
+                                .log(java.util.logging.Level.INFO,
+                                    "VM {0} stop completed with status: {1}",
+                                    new Object[]{virtualMachineId, stopStatus});
+                        } catch (Exception stopWaitError) {
+                            java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName())
+                                .log(java.util.logging.Level.WARNING,
+                                    "Failed to wait for VM stop: " + stopWaitError.getMessage());
+                        }
+
+                        // Now delete the VM
                         String deleteTask = pveApi.deleteQemuMachine(datacenterNode, virtualMachineId);
                         java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName())
                             .log(java.util.logging.Level.INFO,
@@ -147,7 +170,7 @@ public class VirtualMachineSlave extends Slave {
                     } catch (Exception vmDeleteError) {
                         java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName())
                             .log(java.util.logging.Level.WARNING,
-                                "Failed to delete VM " + virtualMachineId + " from Proxmox: " + vmDeleteError.getMessage());
+                                "Failed to stop/delete VM " + virtualMachineId + " from Proxmox: " + vmDeleteError.getMessage());
                     }
                 }
 
