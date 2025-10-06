@@ -171,6 +171,21 @@ public class VirtualMachineSlave extends Slave {
                     }
                 }
 
+                // Disconnect the agent to close WebSocket connection before removing
+                Computer computer = toComputer();
+                if (computer != null) {
+                    try {
+                        computer.disconnect(new hudson.slaves.OfflineCause.UserCause(hudson.model.User.getUnknown(),
+                            "Agent deprovisioned after limited builds"));
+                        java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName())
+                            .log(java.util.logging.Level.INFO, "Agent " + getNodeName() + " disconnected before removal");
+                    } catch (Exception disconnectError) {
+                        java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName())
+                            .log(java.util.logging.Level.WARNING,
+                                "Failed to disconnect agent before removal: " + disconnectError.getMessage());
+                    }
+                }
+
                 // Remove the node from Jenkins after limited builds reached
                 Jenkins jenkins = Jenkins.get();
                 jenkins.removeNode(this);
