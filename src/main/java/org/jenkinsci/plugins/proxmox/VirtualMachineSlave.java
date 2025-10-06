@@ -143,8 +143,7 @@ public class VirtualMachineSlave extends Slave {
                         // Stop the VM first
                         java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName())
                             .log(java.util.logging.Level.INFO,
-                                "Stopping VM {0} before deletion",
-                                virtualMachineId);
+                                "Stopping VM " + virtualMachineId + " before deletion");
                         String stopTask = pveApi.stopQemuMachine(datacenterNode, virtualMachineId);
 
                         // Wait for stop task to complete
@@ -153,8 +152,7 @@ public class VirtualMachineSlave extends Slave {
                             String stopStatus = stopResult.getString("status");
                             java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName())
                                 .log(java.util.logging.Level.INFO,
-                                    "VM {0} stop completed with status: {1}",
-                                    new Object[]{virtualMachineId, stopStatus});
+                                    "VM " + virtualMachineId + " stop completed with status: " + stopStatus);
                         } catch (Exception stopWaitError) {
                             java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName())
                                 .log(java.util.logging.Level.WARNING,
@@ -165,8 +163,7 @@ public class VirtualMachineSlave extends Slave {
                         String deleteTask = pveApi.deleteQemuMachine(datacenterNode, virtualMachineId);
                         java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName())
                             .log(java.util.logging.Level.INFO,
-                                "VM {0} deletion initiated (task: {1})",
-                                new Object[]{virtualMachineId, deleteTask});
+                                "VM " + virtualMachineId + " deletion initiated (task: " + deleteTask + ")");
                     } catch (Exception vmDeleteError) {
                         java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName())
                             .log(java.util.logging.Level.WARNING,
