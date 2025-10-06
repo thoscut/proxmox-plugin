@@ -187,7 +187,44 @@ public class Datacenter extends Cloud {
 
         public Node call() throws Exception {
             try {
+                // Create and provision the node
                 Node result = template.provision(Datacenter.this, plannedNodeName);
+
+                // Wait for the agent to connect before reporting provisioning as complete
+                if (result != null) {
+                    Computer computer = result.toComputer();
+                    if (computer != null) {
+                        LOGGER.log(Level.FINE, "Waiting for agent {0} to connect...", plannedNodeName);
+
+                        // Wait up to 5 minutes for the agent to connect
+                        int maxWaitSeconds = 300;
+                        int waitedSeconds = 0;
+                        while (waitedSeconds < maxWaitSeconds) {
+                            if (computer.isOnline()) {
+                                LOGGER.log(Level.INFO, "Agent {0} connected successfully after {1} seconds",
+                                    new Object[]{plannedNodeName, waitedSeconds});
+                                break;
+                            }
+
+                            // Check if connection failed
+                            if (computer.getOfflineCause() != null &&
+                                !(computer.getOfflineCause() instanceof hudson.slaves.OfflineCause.SimpleOfflineCause)) {
+                                LOGGER.log(Level.WARNING, "Agent {0} went offline during connection: {1}",
+                                    new Object[]{plannedNodeName, computer.getOfflineCause()});
+                                break;
+                            }
+
+                            Thread.sleep(1000);
+                            waitedSeconds++;
+                        }
+
+                        if (!computer.isOnline()) {
+                            LOGGER.log(Level.WARNING, "Agent {0} did not connect within {1} seconds",
+                                new Object[]{plannedNodeName, maxWaitSeconds});
+                        }
+                    }
+                }
+
                 long duration = System.currentTimeMillis() - startTime;
                 getStatistics().recordProvisioningSuccess(duration);
                 return result;
