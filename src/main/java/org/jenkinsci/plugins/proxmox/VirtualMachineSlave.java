@@ -134,6 +134,23 @@ public class VirtualMachineSlave extends Slave {
         buildsExecuted++;
         if (limitedBuildsCount > 0 && buildsExecuted >= limitedBuildsCount) {
             try {
+                // Delete the VM from Proxmox first
+                Datacenter datacenter = getDatacenterByDescriptionFromSlave(datacenterDescription);
+                if (datacenter != null && virtualMachineId != null && datacenterNode != null) {
+                    try {
+                        Connector pveApi = datacenter.proxmoxInstance();
+                        String deleteTask = pveApi.deleteQemuMachine(datacenterNode, virtualMachineId);
+                        java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName())
+                            .log(java.util.logging.Level.INFO,
+                                "VM {0} deletion initiated (task: {1})",
+                                new Object[]{virtualMachineId, deleteTask});
+                    } catch (Exception vmDeleteError) {
+                        java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName())
+                            .log(java.util.logging.Level.WARNING,
+                                "Failed to delete VM " + virtualMachineId + " from Proxmox: " + vmDeleteError.getMessage());
+                    }
+                }
+
                 // Remove the node from Jenkins after limited builds reached
                 Jenkins jenkins = Jenkins.get();
                 jenkins.removeNode(this);
@@ -147,6 +164,17 @@ public class VirtualMachineSlave extends Slave {
                     .log(java.util.logging.Level.WARNING, "Failed to deprovision agent after limited builds", e);
             }
         }
+    }
+
+    private Datacenter getDatacenterByDescriptionFromSlave(String datacenterDescription) {
+        if (datacenterDescription != null && !datacenterDescription.equals("")) {
+            for (Cloud cloud : Jenkins.get().clouds) {
+                if (cloud instanceof Datacenter && ((Datacenter) cloud).getDatacenterDescription().equals(datacenterDescription)) {
+                    return (Datacenter) cloud;
+                }
+            }
+        }
+        return null;
     }
 
     @Override
