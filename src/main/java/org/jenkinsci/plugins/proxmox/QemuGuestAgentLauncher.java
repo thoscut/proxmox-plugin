@@ -36,10 +36,9 @@ public class QemuGuestAgentLauncher extends JNLPLauncher {
     private final String workDir;
     private final boolean curlSslNoRevoke;
     private final boolean useDirect;
-    private final boolean useInstanceIdentity;
 
     @DataBoundConstructor
-    public QemuGuestAgentLauncher(String agentCommand, int connectionTimeoutSeconds, int maxRetries, boolean waitForAgentReady, boolean useWebSocket, String workDir, boolean curlSslNoRevoke, boolean useDirect, boolean useInstanceIdentity) {
+    public QemuGuestAgentLauncher(String agentCommand, int connectionTimeoutSeconds, int maxRetries, boolean waitForAgentReady, boolean useWebSocket, String workDir, boolean curlSslNoRevoke, boolean useDirect) {
         this.agentCommand = agentCommand;
         this.connectionTimeoutSeconds = connectionTimeoutSeconds > 0 ? connectionTimeoutSeconds : 60;
         this.maxRetries = maxRetries > 0 ? maxRetries : 3;
@@ -48,7 +47,6 @@ public class QemuGuestAgentLauncher extends JNLPLauncher {
         this.workDir = workDir;
         this.curlSslNoRevoke = curlSslNoRevoke;
         this.useDirect = useDirect;
-        this.useInstanceIdentity = useInstanceIdentity;
     }
 
     private String getDefaultAgentCommand() {
@@ -84,19 +82,27 @@ public class QemuGuestAgentLauncher extends JNLPLauncher {
         }
         cmd.append(" {JENKINS_URL}jnlpJars/agent.jar && ");
 
-        // Run the agent with secret from file
-        cmd.append("java -jar agent.jar -url {JENKINS_URL} -secret @secret-file -name {COMPUTER_NAME}");
+        // Run the agent
+        cmd.append("java -jar agent.jar");
 
-        if (useWebSocket) {
-            cmd.append(" -webSocket");
-        }
+        // -url and -direct are mutually exclusive
         if (useDirect) {
-            cmd.append(" -direct {JENKINS_URL}");
-            // When using -direct, -instanceIdentity is required
-            cmd.append(" -instanceIdentity instance-identity");
-        } else if (useInstanceIdentity) {
-            cmd.append(" -instanceIdentity instance-identity");
+            // Use -direct mode with instance identity passed directly
+            cmd.append(" -direct {DIRECT_CONNECTION}");
+            cmd.append(" -secret @secret-file");
+            // -instanceIdentity value passed directly (not via file)
+            cmd.append(" -instanceIdentity {INSTANCE_IDENTITY}");
+            // -direct does not support -webSocket
+        } else {
+            cmd.append(" -url {JENKINS_URL}");
+            cmd.append(" -secret @secret-file");
+            if (useWebSocket) {
+                cmd.append(" -webSocket");
+            }
         }
+
+        cmd.append(" -name {COMPUTER_NAME}");
+
         if (workDir != null && !workDir.trim().isEmpty()) {
             cmd.append(" -workDir ").append(workDir);
         }
@@ -108,10 +114,6 @@ public class QemuGuestAgentLauncher extends JNLPLauncher {
         // IMPORTANT: Add spaces around operators so they split correctly into array elements
         StringBuilder cmd = new StringBuilder();
 
-        // Create secret file first (more secure than passing secret on command line)
-        // Add spaces around > and & for proper splitting
-        cmd.append("echo {SECRET} > secret-file & ");
-
         // Download agent.jar from Jenkins (use curl.exe on Windows)
         cmd.append("curl.exe -sO");
         if (curlSslNoRevoke) {
@@ -119,19 +121,27 @@ public class QemuGuestAgentLauncher extends JNLPLauncher {
         }
         cmd.append(" {JENKINS_URL}jnlpJars/agent.jar & ");
 
-        // Run the agent with secret from file
-        cmd.append("java -jar agent.jar -url {JENKINS_URL} -secret @secret-file -name {COMPUTER_NAME}");
+        // Run the agent
+        cmd.append("java -jar agent.jar");
 
-        if (useWebSocket) {
-            cmd.append(" -webSocket");
-        }
+        // -url and -direct are mutually exclusive
         if (useDirect) {
-            cmd.append(" -direct {JENKINS_URL}");
-            // When using -direct, -instanceIdentity is required
-            cmd.append(" -instanceIdentity instance-identity");
-        } else if (useInstanceIdentity) {
-            cmd.append(" -instanceIdentity instance-identity");
+            // Use -direct mode with instance identity passed directly
+            cmd.append(" -direct {DIRECT_CONNECTION}");
+            cmd.append(" -secret {SECRET}");
+            // -instanceIdentity value passed directly (not via file)
+            cmd.append(" -instanceIdentity {INSTANCE_IDENTITY}");
+            // -direct does not support -webSocket
+        } else {
+            cmd.append(" -url {JENKINS_URL}");
+            cmd.append(" -secret {SECRET}");
+            if (useWebSocket) {
+                cmd.append(" -webSocket");
+            }
         }
+
+        cmd.append(" -name {COMPUTER_NAME}");
+
         if (workDir != null && !workDir.trim().isEmpty()) {
             cmd.append(" -workDir ").append(workDir);
         }
@@ -170,10 +180,6 @@ public class QemuGuestAgentLauncher extends JNLPLauncher {
         return useDirect;
     }
 
-    public boolean getUseInstanceIdentity() {
-        return useInstanceIdentity;
-    }
-
     @Override
     public void launch(SlaveComputer computer, TaskListener listener) {
         listener.getLogger().println("Starting Jenkins agent via QEMU Guest Agent...");
@@ -202,6 +208,10 @@ public class QemuGuestAgentLauncher extends JNLPLauncher {
 
             if (waitForAgentReady) {
                 listener.getLogger().println("Agent command started with PID: " + pid + ". Waiting for agent to become ready...");
+
+                // Poll for command output while waiting for agent connection
+                pollCommandOutput(proxmoxApi, datacenterNode, vmId, pid, listener);
+
                 waitForAgentConnection(computer, listener);
             } else {
                 listener.getLogger().println("Agent command started with PID: " + pid + ". Not waiting for connection.");
@@ -210,8 +220,10 @@ public class QemuGuestAgentLauncher extends JNLPLauncher {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             LOGGER.log(Level.SEVERE, "Agent launch was interrupted", e);
+            listener.getLogger().println("ERROR: Agent launch was interrupted: " + e.getMessage());
         } catch (Exception e) {
             LOGGER.log(Level.SEVERE, "Failed to launch agent via guest agent", e);
+            listener.getLogger().println("ERROR: Failed to launch agent via guest agent: " + e.getMessage());
         }
     }
 
@@ -221,18 +233,76 @@ public class QemuGuestAgentLauncher extends JNLPLauncher {
             ? agentCommand
             : getDefaultAgentCommand();
 
+        Jenkins jenkins = Jenkins.get();
+
         // Replace common variables
-        command = command.replace("{JENKINS_URL}", Jenkins.get().getRootUrl());
+        command = command.replace("{JENKINS_URL}", jenkins.getRootUrl());
         command = command.replace("{COMPUTER_NAME}", computer.getName());
         command = command.replace("{SECRET}", computer.getJnlpMac());
         command = command.replace("{VM_ID}", slave.getVirtualMachineId().toString());
 
-        // Replace instance identity placeholder
-        // Note: Instance identity should be provided in custom command if needed
-        // The placeholder is left as-is for users to replace or configure externally
-        // command = command.replace("{INSTANCE_IDENTITY}", "");
+        // Replace direct connection URL (hostname:port for TCP agent listener)
+        // This uses the TCP port configured in Jenkins security settings for inbound agents
+        if (command.contains("{DIRECT_CONNECTION}")) {
+            String directConnection = getDirectConnectionUrl(jenkins);
+            command = command.replace("{DIRECT_CONNECTION}", directConnection);
+        }
+
+        // Replace instance identity with the actual Jenkins instance identity public key
+        if (command.contains("{INSTANCE_IDENTITY}")) {
+            String instanceIdentity = getInstanceIdentity();
+            command = command.replace("{INSTANCE_IDENTITY}", instanceIdentity);
+        }
 
         return command;
+    }
+
+    private String getDirectConnectionUrl(Jenkins jenkins) {
+        // Get the Jenkins URL and extract hostname
+        String jenkinsUrl = jenkins.getRootUrl();
+        if (jenkinsUrl == null) {
+            jenkinsUrl = "http://localhost:8080/";
+        }
+
+        // Extract hostname from Jenkins URL
+        String hostname;
+        try {
+            java.net.URL url = new java.net.URL(jenkinsUrl);
+            hostname = url.getHost();
+        } catch (Exception e) {
+            hostname = "localhost";
+        }
+
+        // Get the TCP port for inbound agents from Jenkins settings
+        // This is configured in Manage Jenkins > Security > TCP port for inbound agents
+        int slaveAgentPort = 50000; // Default port
+        if (jenkins.getTcpSlaveAgentListener() != null) {
+            slaveAgentPort = jenkins.getTcpSlaveAgentListener().getAdvertisedPort();
+        }
+
+        return hostname + ":" + slaveAgentPort;
+    }
+
+    private String getInstanceIdentity() {
+        try {
+            // Get Jenkins instance identity - now that we have the dependency, we can use it directly
+            org.jenkinsci.main.modules.instance_identity.InstanceIdentity identity =
+                org.jenkinsci.main.modules.instance_identity.InstanceIdentity.get();
+
+            // Get the public key
+            java.security.interfaces.RSAPublicKey publicKey = identity.getPublic();
+
+            if (publicKey == null) {
+                throw new IllegalStateException("Jenkins instance identity public key is not available");
+            }
+
+            // Encode the public key to base64
+            byte[] encoded = publicKey.getEncoded();
+            return java.util.Base64.getEncoder().encodeToString(encoded);
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Failed to retrieve instance identity. Direct mode requires Jenkins instance identity.", e);
+            throw new RuntimeException("Cannot retrieve Jenkins instance identity required for direct mode connection", e);
+        }
     }
 
     private String executeAgentCommand(Connector proxmoxApi, String node, Integer vmId, String command, TaskListener listener)
@@ -248,7 +318,8 @@ public class QemuGuestAgentLauncher extends JNLPLauncher {
 
                 // Execute the command via guest agent
                 String pid = proxmoxApi.executeGuestCommand(node, vmId, command);
-                listener.getLogger().println("Guest agent command executed successfully");
+                listener.getLogger().println("Guest agent command executed successfully with PID: " + pid);
+
                 return pid;
 
             } catch (Exception e) {
@@ -264,6 +335,119 @@ public class QemuGuestAgentLauncher extends JNLPLauncher {
 
         throw new RuntimeException("Failed to execute agent command after " + maxRetries + " attempts. Last error: " +
                                  (lastException != null ? lastException.getMessage() : "Unknown error"));
+    }
+
+    private void pollCommandOutput(Connector proxmoxApi, String node, Integer vmId, String pid, TaskListener listener)
+            throws InterruptedException {
+        listener.getLogger().println("Polling for command output...");
+
+        // Poll for up to 10 seconds (5 attempts with 2 second intervals)
+        int maxPolls = 5;
+        for (int i = 0; i < maxPolls; i++) {
+            try {
+                Thread.sleep(2000); // Wait 2 seconds between polls
+
+                JSONObject status = proxmoxApi.getGuestCommandStatus(node, vmId, pid);
+
+                if (status != null) {
+                    logCommandStatus(status, listener);
+
+                    // If command has exited, stop polling
+                    // Check if command has exited - "exited" can be boolean or integer (0/1)
+                    boolean hasExited = false;
+                    if (status.has("exited")) {
+                        Object exitedObj = status.get("exited");
+                        if (exitedObj instanceof Boolean) {
+                            hasExited = (Boolean) exitedObj;
+                        } else if (exitedObj instanceof Number) {
+                            hasExited = ((Number) exitedObj).intValue() != 0;
+                        }
+                    }
+
+                    if (hasExited) {
+                        listener.getLogger().println("Command has completed, stopping output poll.");
+                        break;
+                    }
+                }
+            } catch (Exception e) {
+                listener.getLogger().println("Failed to retrieve command status (poll " + (i+1) + "/" + maxPolls + "): " + e.getMessage());
+                LOGGER.log(Level.WARNING, "Failed to retrieve command status during polling", e);
+            }
+        }
+    }
+
+    private void logCommandStatus(JSONObject status, TaskListener listener) {
+        if (status == null) {
+            return;
+        }
+
+        listener.getLogger().println("=== Guest Agent Command Status ===");
+
+        // Debug: log all available fields in the status
+        LOGGER.log(Level.FINE, "Status JSON: {0}", status.toString());
+
+        // Check if command has exited - "exited" can be boolean or integer (0/1)
+        boolean hasExited = false;
+        if (status.has("exited")) {
+            Object exitedObj = status.get("exited");
+            if (exitedObj instanceof Boolean) {
+                hasExited = (Boolean) exitedObj;
+            } else if (exitedObj instanceof Number) {
+                hasExited = ((Number) exitedObj).intValue() != 0;
+            }
+        }
+
+        if (hasExited) {
+            listener.getLogger().println("Command has exited");
+
+            if (status.has("exitcode")) {
+                int exitCode = status.getInt("exitcode");
+                listener.getLogger().println("Exit code: " + exitCode);
+            }
+        } else {
+            listener.getLogger().println("Command is still running");
+        }
+
+        // Log stdout if available (check both "out-data" and "stdout")
+        boolean hasOutput = false;
+        if (status.has("out-data") && !status.isNull("out-data")) {
+            String stdout = status.getString("out-data");
+            if (!stdout.trim().isEmpty()) {
+                listener.getLogger().println("Standard output:");
+                listener.getLogger().println(stdout);
+                hasOutput = true;
+            }
+        } else if (status.has("stdout") && !status.isNull("stdout")) {
+            String stdout = status.getString("stdout");
+            if (!stdout.trim().isEmpty()) {
+                listener.getLogger().println("Standard output:");
+                listener.getLogger().println(stdout);
+                hasOutput = true;
+            }
+        }
+
+        // Log stderr if available (check both "err-data" and "stderr")
+        if (status.has("err-data") && !status.isNull("err-data")) {
+            String stderr = status.getString("err-data");
+            if (!stderr.trim().isEmpty()) {
+                listener.getLogger().println("Standard error:");
+                listener.getLogger().println(stderr);
+                hasOutput = true;
+            }
+        } else if (status.has("stderr") && !status.isNull("stderr")) {
+            String stderr = status.getString("stderr");
+            if (!stderr.trim().isEmpty()) {
+                listener.getLogger().println("Standard error:");
+                listener.getLogger().println(stderr);
+                hasOutput = true;
+            }
+        }
+
+        if (!hasOutput && !hasExited) {
+            listener.getLogger().println("(No output available yet)");
+        }
+
+        listener.getLogger().println("=================================");
     }
 
     private void waitForAgentConnection(SlaveComputer computer, TaskListener listener) throws InterruptedException {
@@ -350,6 +534,22 @@ public class QemuGuestAgentLauncher extends JNLPLauncher {
             } catch (NumberFormatException e) {
                 return FormValidation.error("Max retries must be a valid number");
             }
+        }
+
+        public FormValidation doCheckUseDirect(@QueryParameter boolean useDirect,
+                                               @QueryParameter boolean useWebSocket) {
+            if (useDirect && useWebSocket) {
+                return FormValidation.error("Direct mode is not compatible with WebSocket. Please disable WebSocket when using Direct mode.");
+            }
+            return FormValidation.ok();
+        }
+
+        public FormValidation doCheckUseWebSocket(@QueryParameter boolean useDirect,
+                                                   @QueryParameter boolean useWebSocket) {
+            if (useDirect && useWebSocket) {
+                return FormValidation.error("WebSocket is not compatible with Direct mode. Please disable Direct mode to use WebSocket.");
+            }
+            return FormValidation.ok();
         }
     }
 }

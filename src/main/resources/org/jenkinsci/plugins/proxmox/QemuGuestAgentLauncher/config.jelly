@@ -2,16 +2,14 @@
 <?jelly escape-by-default='true'?>
 <j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form">
 
-    <f:entry title="Use WebSocket" field="useWebSocket">
+    <f:entry title="Use Direct Connection" field="useDirect"
+             description="Use -direct mode instead of -url (mutually exclusive with WebSocket, automatically enables Instance Identity)">
+        <f:checkbox default="false" />
+    </f:entry>
+
+    <f:entry title="Use WebSocket" field="useWebSocket"
+             description="Enable WebSocket connection (not compatible with Direct mode)">
         <f:checkbox default="true" />
-    </f:entry>
-
-    <f:entry title="Use Direct" field="useDirect">
-        <f:checkbox default="false" />
-    </f:entry>
-
-    <f:entry title="Use Instance Identity" field="useInstanceIdentity">
-        <f:checkbox default="false" />
     </f:entry>
 
     <f:entry title="Work Directory" field="workDir">

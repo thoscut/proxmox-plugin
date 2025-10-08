@@ -32,9 +32,10 @@ public class VirtualMachineSlaveComputer extends SlaveComputer {
             getListener().getLogger().println("INFO: Node is disabled, skipping reconnection attempt");
             return;
         }
-        
+
         // Don't try to reconnect if manually taken offline (not temporarily offline)
-        if (isOffline() && !isTemporarilyOffline()) {
+        // BUT allow connection if the node has never been connected before (first launch)
+        if (isOffline() && !isTemporarilyOffline() && getOfflineCause() != null) {
             getListener().getLogger().println("INFO: Node is manually offline, skipping reconnection attempt");
             return;
         }

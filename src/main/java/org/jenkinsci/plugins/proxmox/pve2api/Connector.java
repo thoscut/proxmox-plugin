@@ -468,6 +468,7 @@ public class Connector {
         // Based on QEMU guest agent and Proxmox documentation, we need proper Windows command format
         String[] commandArray;
         if (command.toLowerCase().startsWith("dir") || command.toLowerCase().contains(":\\") ||
+            command.toLowerCase().contains("curl.exe") ||
             command.toLowerCase().startsWith("powershell") || command.toLowerCase().startsWith("cmd") ||
             command.toLowerCase().startsWith("type") || command.toLowerCase().startsWith("copy") ||
             command.toLowerCase().startsWith("del") || command.toLowerCase().startsWith("move") ||
@@ -592,12 +593,17 @@ public class Connector {
         if (dataObj instanceof String) {
             return (String) dataObj;
         } else if (dataObj instanceof Number) {
-            return dataObj.toString();
+            return String.valueOf(((Number) dataObj).longValue());
         } else if (dataObj instanceof kong.unirest.json.JSONObject) {
             // If data is an object, it might contain a pid field
             kong.unirest.json.JSONObject dataJsonObj = (kong.unirest.json.JSONObject) dataObj;
             if (dataJsonObj.has("pid")) {
-                return dataJsonObj.get("pid").toString();
+                Object pidObj = dataJsonObj.get("pid");
+                if (pidObj instanceof Number) {
+                    return String.valueOf(((Number) pidObj).longValue());
+                } else {
+                    return pidObj.toString();
+                }
             } else {
                 return dataJsonObj.toString();
             }
