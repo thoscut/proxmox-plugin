@@ -5,18 +5,21 @@ import hudson.model.Executor;
 import hudson.model.Node;
 import hudson.model.Queue;
 import hudson.model.Slave;
+import hudson.slaves.AbstractCloudComputer;
 import hudson.slaves.OfflineCause;
-import hudson.slaves.SlaveComputer;
+import org.jenkinsci.plugins.cloudstats.TrackedItem;
+import org.jenkinsci.plugins.cloudstats.ProvisioningActivity;
+import edu.umd.cs.findbugs.annotations.CheckForNull;
 import java.io.IOException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-public class VirtualMachineSlaveComputer extends SlaveComputer {
+public class VirtualMachineSlaveComputer extends AbstractCloudComputer<VirtualMachineSlave> implements TrackedItem {
 
     private AtomicBoolean isRevertingSnapshot = new AtomicBoolean(false);
 
-    public VirtualMachineSlaveComputer(Slave slave) {
+    public VirtualMachineSlaveComputer(VirtualMachineSlave slave) {
         super(slave);
     }
 
@@ -233,5 +236,16 @@ public class VirtualMachineSlaveComputer extends SlaveComputer {
     @Override
     protected Future<?> _connect(boolean forceReconnect) {
         return super._connect(forceReconnect);
+    }
+
+    // TrackedItem implementation for cloud-stats integration
+    @Override
+    @CheckForNull
+    public ProvisioningActivity.Id getId() {
+        Node node = getNode();
+        if (node instanceof VirtualMachineSlave) {
+            return ((VirtualMachineSlave) node).getId();
+        }
+        return null;
     }
 }

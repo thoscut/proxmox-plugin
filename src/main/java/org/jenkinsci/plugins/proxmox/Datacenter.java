@@ -30,6 +30,7 @@ import javax.security.auth.login.LoginException;
 import jenkins.model.Jenkins;
 import kong.unirest.json.JSONObject;
 import org.jenkinsci.plugins.proxmox.pve2api.Connector;
+import org.jenkinsci.plugins.cloudstats.ProvisioningActivity;
 import org.jenkinsci.Symbol;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.QueryParameter;
@@ -114,11 +115,24 @@ public class Datacenter extends Cloud {
                 if (toProvision > 0) {
                     for (int i = 0; i < toProvision; i++) {
                         String plannedNodeName = template.getTemplateName() + "-" + System.currentTimeMillis();
-                        plannedNodes.add(new NodeProvisioner.PlannedNode(
-                            plannedNodeName,
-                            Computer.threadPoolForRemoting.submit(new ProvisioningCallback(template, plannedNodeName)),
+
+                        // Create a unique provisioning ID for cloud-stats tracking
+                        ProvisioningActivity.Id provisioningId = new ProvisioningActivity.Id(
+                            getDatacenterDescription(),
+                            template.getTemplateName(),
+                            plannedNodeName
+                        );
+
+                        // Use ProxmoxPlannedNode for cloud-stats integration
+                        ProxmoxPlannedNode plannedNode = new ProxmoxPlannedNode(
+                            provisioningId,
+                            getDatacenterDescription(),
+                            template.getTemplateName(),
+                            Computer.threadPoolForRemoting.submit(new ProvisioningCallback(template, plannedNodeName, provisioningId)),
                             Integer.parseInt(template.getNumExecutors())
-                        ));
+                        );
+
+                        plannedNodes.add(plannedNode);
                     }
                     excessWorkload -= toProvision;
                     if (excessWorkload <= 0) break;
@@ -178,11 +192,13 @@ public class Datacenter extends Cloud {
         private final ProxmoxCloudSlaveTemplate template;
         private final String plannedNodeName;
         private final long startTime;
+        private final ProvisioningActivity.Id provisioningId;
 
-        ProvisioningCallback(ProxmoxCloudSlaveTemplate template, String plannedNodeName) {
+        ProvisioningCallback(ProxmoxCloudSlaveTemplate template, String plannedNodeName, ProvisioningActivity.Id provisioningId) {
             this.template = template;
             this.plannedNodeName = plannedNodeName;
             this.startTime = System.currentTimeMillis();
+            this.provisioningId = provisioningId;
         }
 
         public Node call() throws Exception {
@@ -190,65 +206,23 @@ public class Datacenter extends Cloud {
                 // Create and provision the node
                 Node result = template.provision(Datacenter.this, plannedNodeName);
 
-                // Add the node to Jenkins so we can monitor its connection status
-                if (result != null) {
-                    Jenkins.get().addNode(result);
-                    LOGGER.log(Level.INFO, "Node " + plannedNodeName + " added to Jenkins, waiting for connection...");
-
-                    // Wait for the agent to connect before reporting provisioning as complete
-                    Computer computer = result.toComputer();
-                    if (computer != null) {
-                        // Wait up to 5 minutes for the agent to connect
-                        int maxWaitSeconds = 300;
-                        int waitedSeconds = 0;
-                        boolean launcherInvoked = false;
-
-                        while (waitedSeconds < maxWaitSeconds) {
-                            boolean isOnline = computer.isOnline();
-                            boolean isConnecting = computer.isConnecting();
-
-                            // Check if launcher has been invoked (either connecting or was already connected)
-                            if (!launcherInvoked && (isConnecting || isOnline)) {
-                                launcherInvoked = true;
-                                LOGGER.log(Level.INFO, "Agent " + plannedNodeName + " launcher has been invoked, connection in progress...");
-                            }
-
-                            // Log status every 10 seconds
-                            if (waitedSeconds % 10 == 0 || isOnline) {
-                                String status = isOnline ? "ONLINE" : (isConnecting ? "CONNECTING" : "OFFLINE");
-                                LOGGER.log(Level.INFO, "Agent " + plannedNodeName + " connection status after " +
-                                    waitedSeconds + " seconds: " + status);
-                            }
-
-                            if (isOnline) {
-                                LOGGER.log(Level.INFO, "Agent " + plannedNodeName + " connected successfully after " +
-                                    waitedSeconds + " seconds");
-                                break;
-                            }
-
-                            // Check if connection failed
-                            if (computer.getOfflineCause() != null &&
-                                !(computer.getOfflineCause() instanceof hudson.slaves.OfflineCause.SimpleOfflineCause)) {
-                                LOGGER.log(Level.WARNING, "Agent " + plannedNodeName + " went offline during connection: " +
-                                    computer.getOfflineCause());
-                                break;
-                            }
-
-                            Thread.sleep(1000);
-                            waitedSeconds++;
-                        }
-
-                        if (!computer.isOnline()) {
-                            LOGGER.log(Level.WARNING, "Agent " + plannedNodeName + " did not connect within " +
-                                maxWaitSeconds + " seconds. Launcher invoked: " + launcherInvoked);
-                        }
-                    } else {
-                        LOGGER.log(Level.WARNING, "Unable to get computer for node " + plannedNodeName);
-                    }
+                // Set the provisioning ID on the node for cloud-stats tracking
+                if (result instanceof VirtualMachineSlave) {
+                    ((VirtualMachineSlave) result).setProvisioningId(provisioningId);
                 }
 
+                // Calculate provisioning duration
                 long duration = System.currentTimeMillis() - startTime;
-                getStatistics().recordProvisioningSuccess(duration);
+                LOGGER.log(Level.INFO, "Node {0} provisioned in {1}ms. Jenkins will add node and begin launch phase.",
+                          new Object[]{plannedNodeName, duration});
+
+                // Record in our internal statistics (cloud-stats also tracks this separately)
+                if (result != null) {
+                    getStatistics().recordProvisioningSuccess(duration);
+                }
+
+                // Return the node - Jenkins core will add it and trigger the launch phase
+                // The provisioning phase ends when this method returns
                 return result;
             } catch (Exception e) {
                 getStatistics().recordProvisioningFailure(e.getMessage());

@@ -6,7 +6,7 @@ import static java.util.Optional.ofNullable;
 import hudson.Extension;
 import hudson.model.Computer;
 import hudson.model.Descriptor;
-import hudson.model.Slave;
+import hudson.slaves.AbstractCloudSlave;
 import hudson.slaves.Cloud;
 import hudson.slaves.ComputerLauncher;
 import hudson.slaves.NodeProperty;
@@ -22,11 +22,14 @@ import jenkins.model.Jenkins;
 import kong.unirest.json.JSONObject;
 import org.jenkinsci.plugins.proxmox.VirtualMachineLauncher.RevertPolicy;
 import org.jenkinsci.plugins.proxmox.pve2api.Connector;
+import org.jenkinsci.plugins.cloudstats.TrackedItem;
+import org.jenkinsci.plugins.cloudstats.ProvisioningActivity;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.verb.POST;
+import edu.umd.cs.findbugs.annotations.CheckForNull;
 
-public class VirtualMachineSlave extends Slave {
+public class VirtualMachineSlave extends AbstractCloudSlave implements TrackedItem {
 
     private static final long serialVersionUID = 1L;
 
@@ -39,6 +42,9 @@ public class VirtualMachineSlave extends Slave {
     private RevertPolicy revertPolicy;
     private transient int limitedBuildsCount = 0;
     private transient int buildsExecuted = 0;
+
+    // Cloud-stats tracking
+    private ProvisioningActivity.Id provisioningId;
 
     @DataBoundConstructor
     public VirtualMachineSlave(
@@ -130,6 +136,17 @@ public class VirtualMachineSlave extends Slave {
         return buildsExecuted;
     }
 
+    // TrackedItem implementation for cloud-stats integration
+    @Override
+    @CheckForNull
+    public ProvisioningActivity.Id getId() {
+        return provisioningId;
+    }
+
+    public void setProvisioningId(ProvisioningActivity.Id id) {
+        this.provisioningId = id;
+    }
+
     public void incrementBuildsExecuted() {
         buildsExecuted++;
         if (limitedBuildsCount > 0 && buildsExecuted >= limitedBuildsCount) {
@@ -212,10 +229,25 @@ public class VirtualMachineSlave extends Slave {
     }
 
     @Override
-    public Computer createComputer() {
-        // TODO: Not sure if this is needed, could be able to use this to reset to snapshots
-        // TODO: as a computer is required for a job.
+    public VirtualMachineSlaveComputer createComputer() {
         return new VirtualMachineSlaveComputer(this);
+    }
+
+    @Override
+    protected void _terminate(hudson.model.TaskListener listener) throws IOException, InterruptedException {
+        // Delegate termination to the datacenter
+        Datacenter datacenter = getDatacenterByDescriptionFromSlave(datacenterDescription);
+        if (datacenter != null) {
+            Computer computer = toComputer();
+            if (computer != null) {
+                listener.getLogger().println("Terminating VM " + virtualMachineId + " through datacenter");
+                datacenter.terminate(computer);
+            } else {
+                listener.getLogger().println("Warning: Cannot terminate - computer is null");
+            }
+        } else {
+            listener.getLogger().println("Warning: Cannot terminate - datacenter not found: " + datacenterDescription);
+        }
     }
 
     @Override
