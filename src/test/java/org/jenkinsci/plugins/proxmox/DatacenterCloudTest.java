@@ -1,18 +1,14 @@
 package org.jenkinsci.plugins.proxmox;
 
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
-import static org.hamcrest.Matchers.nullValue;
 
 import hudson.model.Descriptor;
 import hudson.slaves.Cloud;
 import java.util.List;
-import jenkins.model.Jenkins;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
@@ -63,25 +59,6 @@ class DatacenterCloudTest {
     }
     
     @Test
-    @Disabled("Credentials resolution not available in test environment")
-    void should_generate_datacenter_description(JenkinsRule r) {
-        // Test that datacenter description is generated correctly
-        // Disabled because test environment doesn't have credential system configured
-        String hostname = "proxmox.company.com";
-        String credentialsId = "admin-credentials";
-        String realm = "pam";
-
-        Datacenter datacenter = new Datacenter(hostname, credentialsId, realm, false, null, 10);
-        String description = datacenter.getDatacenterDescription();
-
-        assertThat("Description should not be null", description, notNullValue());
-        assertThat("Description should contain realm", description, containsString(realm));
-        assertThat("Description should contain hostname", description, containsString(hostname));
-        // Note: In test environment, username shows as "unknown" when credentials can't be resolved
-        assertThat("Description format should match pattern", description, is("unknown@pam - proxmox.company.com"));
-    }
-    
-    @Test
     void should_have_proper_cloud_name(JenkinsRule r) {
         // Test that the cloud name is generated properly
         String hostname = "my-proxmox";
@@ -100,42 +77,4 @@ class DatacenterCloudTest {
                    datacenterNull.name, is("Proxmox-Datacenter"));
     }
     
-    @Test
-    @Disabled("Credentials resolution not available in test environment")
-    void should_provide_proxmox_connector_instance(JenkinsRule r) {
-        // Test that the datacenter can provide a Proxmox connector
-        // Disabled because test environment doesn't have credential system configured
-        Datacenter datacenter = new Datacenter("test-host", "user-creds", "pve", true, null, 1);
-
-        // This would throw an exception in test environment due to missing credentials
-        // In real environment with proper credentials, this should work:
-        // var connector = datacenter.proxmoxInstance();
-        // assertThat("Connector should not be null", connector, notNullValue());
-
-        // Connector should be reused on subsequent calls
-        // var connector2 = datacenter.proxmoxInstance();
-        // assertThat("Connector should be the same instance", connector, is(connector2));
-
-        // For now, just verify that the datacenter object was created
-        assertThat("Datacenter should be created", datacenter, notNullValue());
-    }
-    
-    @Test
-    @Disabled("Extension registration issue in test environment - needs investigation")
-    void should_have_working_descriptor_methods(JenkinsRule r) {
-        // Test descriptor method functionality
-        Datacenter datacenter = new Datacenter("test", "user-creds", "pve", false, null, 1);
-        Datacenter.DescriptorImpl descriptor = datacenter.getDescriptor();
-
-        assertThat("Descriptor should not be null", descriptor, notNullValue());
-        assertThat("Display name should be set", descriptor.getDisplayName(), is("Proxmox Datacenter"));
-        assertThat("Descriptor should be properly configured", descriptor, notNullValue());
-    }
-    
-    @Test
-    @Disabled("Legacy constructor no longer available after credentials migration")
-    void should_handle_legacy_constructor(JenkinsRule r) {
-        // This test is disabled as the legacy constructor has been removed
-        // in favor of the credentials-based approach for better security
-    }
 }
