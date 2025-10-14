@@ -1,0 +1,35 @@
+<div>
+    <p>
+        Use Jenkins agent direct connection mode (<code>-direct</code>) instead of the standard URL-based connection (<code>-url</code>).
+    </p>
+    <p>
+        <strong>Direct Connection Mode:</strong>
+    </p>
+    <ul>
+        <li>Agent connects directly to Jenkins using instance identity</li>
+        <li>More secure - uses cryptographic identity verification</li>
+        <li>Better for cloud environments and modern security practices</li>
+        <li>Recommended for new installations</li>
+    </ul>
+    <p>
+        <strong>Standard URL Mode (disabled):</strong>
+    </p>
+    <ul>
+        <li>Agent connects using Jenkins URL and secret</li>
+        <li>Traditional JNLP connection method</li>
+        <li>Compatible with older Jenkins versions</li>
+        <li>Can use WebSocket for improved reliability</li>
+    </ul>
+    <p>
+        <strong>⚠️ Important Compatibility Notes:</strong>
+    </p>
+    <ul>
+        <li><strong>WebSocket:</strong> Direct mode does NOT support WebSocket. These options are mutually exclusive.</li>
+        <li><strong>Jenkins Version:</strong> Direct mode requires Jenkins 2.217 or later</li>
+        <li><strong>Firewall:</strong> Direct mode may require different firewall rules than URL mode</li>
+    </ul>
+    <p>
+        <strong>Recommendation:</strong> Use standard URL mode with WebSocket enabled for best compatibility
+        and performance. Only use direct mode if you have specific security requirements or compatibility needs.
+    </p>
+</div>

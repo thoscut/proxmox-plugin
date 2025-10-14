@@ -1,0 +1,29 @@
+<div>
+    <p>
+        The number of concurrent builds that can run on each agent created from this template.
+    </p>
+    <p>
+        <strong>How to Choose:</strong>
+    </p>
+    <ul>
+        <li><strong>1 executor (default):</strong> Recommended for most use cases. Each agent runs one build at a time,
+            providing build isolation and predictable resource usage.</li>
+        <li><strong>2-4 executors:</strong> Suitable for lightweight builds on agents with multiple CPU cores.
+            Increases throughput but may cause resource contention.</li>
+        <li><strong>5+ executors:</strong> Only for very specific use cases with very lightweight tasks.
+            Generally not recommended.</li>
+    </ul>
+    <p>
+        <strong>Considerations:</strong>
+    </p>
+    <ul>
+        <li>More executors = more concurrent builds per VM</li>
+        <li>Each executor needs sufficient CPU, memory, and I/O</li>
+        <li>Builds may compete for resources if executor count is too high</li>
+        <li>For heavy builds (compilation, testing), use 1 executor per VM</li>
+    </ul>
+    <p>
+        <strong>Recommendation:</strong> Start with <code>1</code> executor and only increase if you have
+        lightweight builds and want to maximize VM utilization.
+    </p>
+</div>

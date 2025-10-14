@@ -2,38 +2,57 @@
 <?jelly escape-by-default='true'?>
 <j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form">
 
-    <f:entry title="Use Direct Connection" field="useDirect"
-             description="Use -direct mode instead of -url (mutually exclusive with WebSocket, automatically enables Instance Identity)">
-        <f:checkbox default="false" />
+    <f:entry title="${%Agent Command}" field="agentCommand"
+             help="${descriptor.getHelpFile('agentCommand')}">
+        <f:textarea cols="80" rows="4" placeholder="Leave empty to use auto-generated command"/>
     </f:entry>
 
-    <f:entry title="Use WebSocket" field="useWebSocket"
-             description="Enable WebSocket connection (not compatible with Direct mode)">
-        <f:checkbox default="true" />
+    <f:entry title="${%Work Directory}" field="workDir"
+             help="${descriptor.getHelpFile('workDir')}">
+        <f:textbox placeholder="/home/jenkins or C:\Jenkins"/>
     </f:entry>
 
-    <f:entry title="Work Directory" field="workDir">
-        <f:textbox default="" />
-    </f:entry>
+    <f:advanced title="${%Connection Settings}">
+        <f:entry title="${%Use Direct Connection}" field="useDirect"
+                 help="${descriptor.getHelpFile('useDirect')}">
+            <f:checkbox default="false" />
+            <f:description>
+                Use -direct mode with instance identity (not compatible with WebSocket).
+            </f:description>
+        </f:entry>
 
-    <f:entry title="Curl SSL No Revoke" field="curlSslNoRevoke">
-        <f:checkbox default="false" />
-    </f:entry>
+        <f:entry title="${%Use WebSocket}" field="useWebSocket"
+                 help="${descriptor.getHelpFile('useWebSocket')}">
+            <f:checkbox default="true" />
+            <f:description>
+                Enable WebSocket for improved reliability (not compatible with Direct mode).
+            </f:description>
+        </f:entry>
 
-    <f:entry title="Agent Command" field="agentCommand">
-        <f:textarea cols="80" rows="4" />
-    </f:entry>
+        <f:entry title="${%Connection Timeout (seconds)}" field="connectionTimeoutSeconds"
+                 help="${descriptor.getHelpFile('connectionTimeoutSeconds')}">
+            <f:number default="60" min="1" max="600" />
+        </f:entry>
 
-    <f:entry title="Connection Timeout (seconds)" field="connectionTimeoutSeconds">
-        <f:number default="60" min="1" max="600" />
-    </f:entry>
+        <f:entry title="${%Maximum Retries}" field="maxRetries"
+                 help="${descriptor.getHelpFile('maxRetries')}">
+            <f:number default="3" min="1" max="10" />
+        </f:entry>
 
-    <f:entry title="Maximum Retries" field="maxRetries">
-        <f:number default="3" min="1" max="10" />
-    </f:entry>
+        <f:entry title="${%Wait for Agent Ready}" field="waitForAgentReady"
+                 help="${descriptor.getHelpFile('waitForAgentReady')}">
+            <f:checkbox default="true" />
+        </f:entry>
+    </f:advanced>
 
-    <f:entry title="Wait for Agent Ready" field="waitForAgentReady">
-        <f:checkbox default="true" />
-    </f:entry>
+    <f:advanced title="${%Advanced Options}">
+        <f:entry title="${%Curl: Ignore SSL Certificate Revocation}" field="curlSslNoRevoke"
+                 help="${descriptor.getHelpFile('curlSslNoRevoke')}">
+            <f:checkbox default="false" />
+            <f:description>
+                Windows-specific: Add --ssl-no-revoke flag (only enable if experiencing certificate revocation errors).
+            </f:description>
+        </f:entry>
+    </f:advanced>
 
 </j:jelly>

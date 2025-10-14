@@ -1,0 +1,35 @@
+<div>
+    <p>
+        The time to wait (in seconds) after starting a VM before attempting to connect the Jenkins agent.
+    </p>
+    <p>
+        This waiting period allows the VM to:
+    </p>
+    <ul>
+        <li>Complete the boot process</li>
+        <li>Start network services</li>
+        <li>Initialize the operating system</li>
+        <li>Be ready to accept agent connections</li>
+    </ul>
+    <p>
+        <strong>Recommended Values:</strong>
+    </p>
+    <ul>
+        <li><strong>Fast Linux VMs with cloud-init:</strong> 30-45 seconds</li>
+        <li><strong>Standard Linux VMs:</strong> 60-90 seconds (default: 60)</li>
+        <li><strong>Windows VMs:</strong> 90-180 seconds</li>
+        <li><strong>VMs with slow storage:</strong> 90-120 seconds</li>
+    </ul>
+    <p>
+        <strong>Tuning Tips:</strong>
+    </p>
+    <ul>
+        <li>If agents frequently fail to connect, increase this value</li>
+        <li>If VMs boot faster, decrease to speed up provisioning</li>
+        <li>Monitor your VM boot times to find the optimal value</li>
+        <li>Consider using "Wait for Guest Agent" instead for more reliable detection</li>
+    </ul>
+    <p>
+        Setting this too low will cause connection failures; setting it too high wastes time during provisioning.
+    </p>
+</div>

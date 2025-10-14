@@ -1,0 +1,24 @@
+<div>
+  <p>
+    The maximum time in seconds to wait for the QEMU guest agent to become available
+    after the VM has been started.
+  </p>
+
+  <p>
+    <strong>Default:</strong> 120 seconds (2 minutes)<br/>
+    <strong>Range:</strong> 1-600 seconds
+  </p>
+
+  <p>
+    If the guest agent does not respond within this timeout period, Jenkins will log
+    a warning and continue with the provisioning process anyway. This prevents
+    indefinite blocking when the guest agent is not installed or has issues.
+  </p>
+
+  <p>
+    <strong>Recommendation:</strong> The default of 120 seconds is suitable for most
+    environments. Increase this value if your VMs take longer to boot and initialize
+    the guest agent. For VMs with SSDs and fast boot times, you can reduce this to
+    60 seconds.
+  </p>
+</div>

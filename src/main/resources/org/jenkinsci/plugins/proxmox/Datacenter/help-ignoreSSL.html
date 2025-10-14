@@ -1,0 +1,22 @@
+<div>
+    <p>
+        Disable SSL certificate verification when connecting to the Proxmox VE server.
+    </p>
+    <p>
+        <strong>When to Enable:</strong>
+    </p>
+    <ul>
+        <li>Testing with self-signed certificates</li>
+        <li>Development environments</li>
+        <li>Internal networks where certificate validation is not critical</li>
+    </ul>
+    <p>
+        <strong style="color: #d04437;">⚠ Security Warning:</strong> This option should <strong>not</strong> be enabled
+        in production environments as it makes the connection vulnerable to man-in-the-middle attacks.
+    </p>
+    <p>
+        <strong>Recommended Approach:</strong> Instead of disabling SSL verification, configure your Proxmox VE server
+        with a proper SSL certificate from a trusted Certificate Authority, or add your self-signed certificate
+        to Jenkins' Java trust store.
+    </p>
+</div>
