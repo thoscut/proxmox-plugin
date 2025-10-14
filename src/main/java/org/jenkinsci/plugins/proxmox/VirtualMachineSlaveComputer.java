@@ -18,9 +18,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class VirtualMachineSlaveComputer extends AbstractCloudComputer<VirtualMachineSlave> implements TrackedItem {
 
     private AtomicBoolean isRevertingSnapshot = new AtomicBoolean(false);
+    private final VirtualMachineSlave slave;
 
     public VirtualMachineSlaveComputer(VirtualMachineSlave slave) {
         super(slave);
+        this.slave = slave;
     }
 
     @Override
@@ -242,9 +244,14 @@ public class VirtualMachineSlaveComputer extends AbstractCloudComputer<VirtualMa
     @Override
     @CheckForNull
     public ProvisioningActivity.Id getId() {
+        // Try to get from Jenkins node first
         Node node = getNode();
         if (node instanceof VirtualMachineSlave) {
             return ((VirtualMachineSlave) node).getId();
+        }
+        // Fallback to stored slave reference (for computers not yet added to Jenkins)
+        if (slave != null) {
+            return slave.getId();
         }
         return null;
     }
