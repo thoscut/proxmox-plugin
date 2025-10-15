@@ -13,7 +13,10 @@
 
     <f:entry title="${%Authentication Realm}" field="realm"
              help="${descriptor.getHelpFile('realm')}">
-        <f:textbox default="pve" placeholder="pve"/>
+        <f:select default="pve">
+            <f:option value="pve" selected="${it==null or it.realm=='pve'}">Proxmox VE (pve)</f:option>
+            <f:option value="pam" selected="${it.realm=='pam'}">Linux PAM (pam)</f:option>
+        </f:select>
     </f:entry>
 
     <f:validateButton title="${%Test Connection}" progress="${%Testing...}"
