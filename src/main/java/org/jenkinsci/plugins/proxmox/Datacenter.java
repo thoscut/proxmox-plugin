@@ -794,7 +794,9 @@ public class Datacenter extends Cloud {
                     return fieldNotSpecifiedError("Password");
                 }
 
-                Connector pveConnector = new Connector(hostname, username, realm, password, ignoreSSL);
+                // Handle null ignoreSSL parameter (defaults to false if not specified)
+                boolean shouldIgnoreSSL = ignoreSSL != null && ignoreSSL;
+                Connector pveConnector = new Connector(hostname, username, realm, password, shouldIgnoreSSL);
                 pveConnector.login();
                 return FormValidation.ok("Login successful");
 

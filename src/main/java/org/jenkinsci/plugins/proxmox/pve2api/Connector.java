@@ -58,7 +58,9 @@ public class Connector {
         this.password = password;
 
         this.unirest = Unirest.spawnInstance();
-        unirest.config().verifySsl(!ignoreSSL).reset();
+        // Handle null ignoreSSL parameter (defaults to verifying SSL)
+        boolean shouldVerifySSL = ignoreSSL == null || !ignoreSSL;
+        unirest.config().verifySsl(shouldVerifySSL).reset();
 
         this.authTicketIssuedTimestamp = null;
         this.baseURL = "https://" + hostname + ":" + port.toString() + "/api2/json/";
