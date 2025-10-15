@@ -169,7 +169,7 @@ public class TestUtilities {
      */
     public static ProxmoxCloudSlaveTemplate createTestTemplate(String templateName, String labels,
                                                               String datacenterNode, String templateVmId) {
-        return new ProxmoxCloudSlaveTemplate(
+        ProxmoxCloudSlaveTemplate template = new ProxmoxCloudSlaveTemplate(
             templateName,
             labels,
             "/home/jenkins",
@@ -188,10 +188,12 @@ public class TestUtilities {
             Collections.emptyList(),
             null,
             60,
-            false,
-            false,
-            30
+            false
         );
+        // Set optional fields via setters
+        template.setWaitForGuestAgent(false);
+        template.setWaitForGuestAgentTimeoutSeconds(30);
+        return template;
     }
 
     /**
@@ -201,7 +203,7 @@ public class TestUtilities {
                                                               String datacenterNode, String templateVmId,
                                                               String snapshotName, int instanceCap,
                                                               boolean startVM, boolean linkedClone) {
-        return new ProxmoxCloudSlaveTemplate(
+        ProxmoxCloudSlaveTemplate template = new ProxmoxCloudSlaveTemplate(
             templateName,
             labels,
             "/home/jenkins",
@@ -220,10 +222,12 @@ public class TestUtilities {
             Collections.emptyList(),
             null,
             60,
-            false,
-            true,
-            30
+            false
         );
+        // Set optional fields via setters
+        template.setWaitForGuestAgent(true);
+        template.setWaitForGuestAgentTimeoutSeconds(30);
+        return template;
     }
 
     /**

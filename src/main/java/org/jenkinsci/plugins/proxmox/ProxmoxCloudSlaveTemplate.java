@@ -30,6 +30,7 @@ import kong.unirest.json.JSONObject;
 import org.jenkinsci.plugins.proxmox.pve2api.Connector;
 import org.jenkinsci.plugins.proxmox.VirtualMachineLauncher.RevertPolicy;
 import org.kohsuke.stapler.DataBoundConstructor;
+import org.kohsuke.stapler.DataBoundSetter;
 import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.verb.POST;
 
@@ -59,8 +60,8 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
     private final String postCloneCommand;
     private final int postCloneCommandTimeout;
     private final boolean runPostCloneCommand;
-    private final boolean waitForGuestAgent;
-    private final int waitForGuestAgentTimeoutSeconds;
+    private boolean waitForGuestAgent;
+    private int waitForGuestAgentTimeoutSeconds;
 
     private transient Set<LabelAtom> labelSet;
     private transient AtomicInteger currentlyProvisioning = new AtomicInteger(0);
@@ -84,9 +85,7 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
                                    List<? extends NodeProperty<?>> nodeProperties,
                                    String postCloneCommand,
                                    int postCloneCommandTimeout,
-                                   boolean runPostCloneCommand,
-                                   boolean waitForGuestAgent,
-                                   int waitForGuestAgentTimeoutSeconds) {
+                                   boolean runPostCloneCommand) {
         this.templateName = templateName;
         this.labels = labels;
         this.remoteFS = remoteFS;
@@ -106,7 +105,18 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
         this.postCloneCommand = postCloneCommand;
         this.postCloneCommandTimeout = postCloneCommandTimeout > 0 ? postCloneCommandTimeout : 300;
         this.runPostCloneCommand = runPostCloneCommand;
+        // Default values for new fields (will be set via setters or readResolve)
+        this.waitForGuestAgent = false;
+        this.waitForGuestAgentTimeoutSeconds = 120;
+    }
+
+    @DataBoundSetter
+    public void setWaitForGuestAgent(boolean waitForGuestAgent) {
         this.waitForGuestAgent = waitForGuestAgent;
+    }
+
+    @DataBoundSetter
+    public void setWaitForGuestAgentTimeoutSeconds(int waitForGuestAgentTimeoutSeconds) {
         this.waitForGuestAgentTimeoutSeconds = waitForGuestAgentTimeoutSeconds > 0 ? waitForGuestAgentTimeoutSeconds : 120;
     }
 
@@ -548,6 +558,10 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
         }
         if (labelSet == null) {
             // labelSet will be initialized lazily in getLabelAtoms()
+        }
+        // Initialize new fields with defaults for old configurations
+        if (waitForGuestAgentTimeoutSeconds == 0) {
+            waitForGuestAgentTimeoutSeconds = 120;
         }
         return this;
     }
