@@ -59,6 +59,8 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
     private final String postCloneCommand;
     private final int postCloneCommandTimeout;
     private final boolean runPostCloneCommand;
+    private final boolean waitForGuestAgent;
+    private final int waitForGuestAgentTimeoutSeconds;
 
     private transient Set<LabelAtom> labelSet;
     private transient AtomicInteger currentlyProvisioning = new AtomicInteger(0);
@@ -82,7 +84,9 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
                                    List<? extends NodeProperty<?>> nodeProperties,
                                    String postCloneCommand,
                                    int postCloneCommandTimeout,
-                                   boolean runPostCloneCommand) {
+                                   boolean runPostCloneCommand,
+                                   boolean waitForGuestAgent,
+                                   int waitForGuestAgentTimeoutSeconds) {
         this.templateName = templateName;
         this.labels = labels;
         this.remoteFS = remoteFS;
@@ -102,6 +106,8 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
         this.postCloneCommand = postCloneCommand;
         this.postCloneCommandTimeout = postCloneCommandTimeout > 0 ? postCloneCommandTimeout : 300;
         this.runPostCloneCommand = runPostCloneCommand;
+        this.waitForGuestAgent = waitForGuestAgent;
+        this.waitForGuestAgentTimeoutSeconds = waitForGuestAgentTimeoutSeconds > 0 ? waitForGuestAgentTimeoutSeconds : 120;
     }
 
     public boolean canProvision(Label label) {
@@ -145,6 +151,11 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
             
             if (startVM) {
                 startClonedVm(proxmoxApi, clonedVmId, cloneName);
+
+                // Wait for guest agent if configured
+                if (waitForGuestAgent) {
+                    waitForGuestAgentReady(proxmoxApi, clonedVmId, cloneName);
+                }
             }
 
             // Execute post-clone command if configured
@@ -632,6 +643,53 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
         }
     }
 
+    /**
+     * Wait for the QEMU guest agent to become ready on the VM.
+     * Similar to vSphere's "Wait for VMTools" feature.
+     */
+    private void waitForGuestAgentReady(Connector proxmoxApi, Integer vmId, String vmName) {
+        LOGGER.log(Level.INFO, "Waiting for QEMU guest agent to become ready on VM {0} (ID: {1})",
+                  new Object[]{vmName, vmId});
+
+        long startTime = System.currentTimeMillis();
+        long timeoutMs = waitForGuestAgentTimeoutSeconds * 1000L;
+        int pollIntervalMs = 5000; // Poll every 5 seconds
+
+        try {
+            while ((System.currentTimeMillis() - startTime) < timeoutMs) {
+                try {
+                    // Check if guest agent is available
+                    boolean isAvailable = proxmoxApi.isGuestAgentAvailable(datacenterNode, vmId);
+
+                    if (isAvailable) {
+                        LOGGER.log(Level.INFO, "QEMU guest agent is ready on VM {0} (ID: {1})",
+                                  new Object[]{vmName, vmId});
+                        return;
+                    }
+
+                    LOGGER.log(Level.FINE, "QEMU guest agent not ready yet on VM {0}, waiting...", vmName);
+
+                } catch (Exception e) {
+                    // Log but continue polling - guest agent might not be responding yet
+                    LOGGER.log(Level.FINE, "Error checking guest agent status on VM {0}: {1}",
+                              new Object[]{vmName, e.getMessage()});
+                }
+
+                // Wait before next poll
+                Thread.sleep(pollIntervalMs);
+            }
+
+            // Timeout reached
+            LOGGER.log(Level.WARNING,
+                      "QEMU guest agent did not become ready within {0} seconds on VM {1} (ID: {2}). Continuing anyway.",
+                      new Object[]{waitForGuestAgentTimeoutSeconds, vmName, vmId});
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            LOGGER.log(Level.WARNING, "Interrupted while waiting for guest agent on VM " + vmName, e);
+        }
+    }
+
     public String getTemplateName() { return templateName; }
     public String getLabels() { return labels; }
     public String getRemoteFS() { return remoteFS; }
@@ -651,6 +709,8 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
     public String getPostCloneCommand() { return postCloneCommand; }
     public int getPostCloneCommandTimeout() { return postCloneCommandTimeout; }
     public boolean getRunPostCloneCommand() { return runPostCloneCommand; }
+    public boolean getWaitForGuestAgent() { return waitForGuestAgent; }
+    public int getWaitForGuestAgentTimeoutSeconds() { return waitForGuestAgentTimeoutSeconds; }
 
     @Extension
     public static class DescriptorImpl extends Descriptor<ProxmoxCloudSlaveTemplate> {
