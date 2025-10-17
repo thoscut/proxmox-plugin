@@ -19,6 +19,14 @@
         </f:select>
     </f:entry>
 
+    <f:entry title="${%Ignore SSL Certificate Errors}" field="ignoreSSL"
+             help="${descriptor.getHelpFile('ignoreSSL')}">
+        <f:checkbox default="false" />
+        <f:description>
+            <strong style="color: #d04437;">Warning:</strong> Only enable for testing with self-signed certificates.
+        </f:description>
+    </f:entry>
+
     <f:validateButton title="${%Test Connection}" progress="${%Testing...}"
                       method="testConnection"
                       with="hostname,credentialsId,realm,ignoreSSL"/>
@@ -31,15 +39,6 @@
         </f:description>
     </f:entry>
 
-    <f:advanced title="${%Advanced Settings}">
-        <f:entry title="${%Ignore SSL Certificate Errors}" field="ignoreSSL"
-                 help="${descriptor.getHelpFile('ignoreSSL')}">
-            <f:checkbox default="false" />
-            <f:description>
-                <strong style="color: #d04437;">Warning:</strong> Only enable for testing with self-signed certificates.
-            </f:description>
-        </f:entry>
-    </f:advanced>
 
     <f:repeatableProperty field="templates" header="${%Agent Templates}"
                          addCaption="${%Add Agent Template}"/>
