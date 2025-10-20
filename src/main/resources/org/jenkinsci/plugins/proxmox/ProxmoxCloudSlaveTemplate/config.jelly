@@ -112,7 +112,7 @@
         </f:entry>
 
         <f:entry title="${%Limited Builds Before Disconnect}" field="limitedBuildsBeforeDisconnect"
-                 help="/help/system-config/master-slave/limited-builds.html">
+                 help="${descriptor.getHelpFile('limitedBuildsBeforeDisconnect')}">
             <f:number default="0" clazz="number" min="0" step="1"/>
             <f:description>
                 Disconnect agent after this many builds. Set to 0 for unlimited builds.

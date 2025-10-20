@@ -1,0 +1,37 @@
+<div>
+    <p>
+        <strong>Limited Builds Before Disconnect</strong>
+    </p>
+    <p>
+        Maximum number of builds this agent will execute before automatically disconnecting.
+        After disconnection, the agent can be restarted for another cycle of builds.
+    </p>
+    <p>
+        <strong>Use cases:</strong>
+    </p>
+    <ul>
+        <li><strong>0 (default):</strong> Unlimited builds - agent runs indefinitely</li>
+        <li><strong>1:</strong> Single-use agent - disconnects after one build (good for isolation)</li>
+        <li><strong>5-10:</strong> Limited reuse - prevents agent drift over multiple builds</li>
+        <li><strong>20+:</strong> High reuse - balances efficiency with freshness</li>
+    </ul>
+    <p>
+        <strong>Benefits of limited builds:</strong>
+    </p>
+    <ul>
+        <li>Prevents environment drift from accumulating across builds</li>
+        <li>Ensures periodic VM cleanup via snapshot revert</li>
+        <li>Reduces risk of side effects between builds</li>
+        <li>Balances between clean environments and resource efficiency</li>
+    </ul>
+    <p>
+        <strong>Recommendation:</strong> For critical builds requiring pristine environments,
+        use a low value (1-5). For routine builds where efficiency matters more, use higher
+        values (20+) or 0 for unlimited.
+    </p>
+    <p>
+        <strong>Note:</strong> Works in combination with snapshot revert policies. When the
+        agent disconnects after reaching the limit, it can be reverted to a clean snapshot
+        before the next cycle.
+    </p>
+</div>
