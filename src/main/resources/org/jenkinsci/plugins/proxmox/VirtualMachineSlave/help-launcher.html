@@ -1,0 +1,23 @@
+<div>
+    <p>
+        <strong>Secondary Launch Method</strong>
+    </p>
+    <p>
+        The launch method determines how Jenkins connects to this agent after the VM is started.
+        For Proxmox VMs, you typically need to choose a secondary launch method in addition to
+        the primary VirtualMachineLauncher.
+    </p>
+    <p>
+        <strong>Common launch methods:</strong>
+    </p>
+    <ul>
+        <li><strong>JNLP Agent:</strong> The agent connects to Jenkins (good for agents behind firewalls)</li>
+        <li><strong>SSH:</strong> Jenkins connects to the agent via SSH (requires SSH credentials configured)</li>
+        <li><strong>QEMU Guest Agent Launcher:</strong> Uses Proxmox QEMU Guest Agent to launch the Jenkins agent</li>
+    </ul>
+    <p>
+        <strong>Recommendation:</strong> For Proxmox VMs, use the QEMU Guest Agent Launcher for the most
+        reliable connection, as it can execute commands directly via the guest agent without requiring
+        network connectivity to be fully established.
+    </p>
+</div>

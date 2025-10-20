@@ -1,8 +1,15 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git commit:*)",
-      "Bash(git revert:*)"
+      "Bash(done)",
+      "Bash(export JAVA_HOME=\"C:\\Program Files\\Eclipse Adoptium\\jdk-21.0.6.7-hotspot\")",
+      "Bash(xargs:*)",
+      "Bash(mvn test-compile:*)",
+      "Bash(mvn dependency:*)",
+      "Bash(mvn clean:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nMove ''Ignore SSL Certificate Errors'' checkbox before Test Connection button\n\nProblem:\nEven after the backend fix in e52ba53, the ''Ignore SSL certificates''\ncheckbox wasn''t working reliably with the Test Connection button.\nThe checkbox was inside an <f:advanced> section that might be collapsed,\npreventing its value from being properly sent to the validation method.\n\nSolution:\nMove the ignoreSSL checkbox out of the advanced section and place it\ndirectly before the Test Connection button. This ensures the field is\nalways visible and its value is always available to the validation button.\n\nBenefits:\n- SSL certificate option is now prominently visible (important security setting)\n- Test Connection button reliably respects the checkbox state\n- Better UX: users don''t need to expand Advanced to test with self-signed certs\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(export:*)"
     ],
     "deny": [],
     "ask": []
