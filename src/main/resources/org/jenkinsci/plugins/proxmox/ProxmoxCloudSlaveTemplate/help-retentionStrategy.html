@@ -1,0 +1,55 @@
+<div>
+    <p>
+        <strong>Retention Strategy</strong>
+    </p>
+    <p>
+        Controls when and how Jenkins keeps the agent online or takes it offline.
+        This determines the lifecycle behavior of your Proxmox VM agents.
+    </p>
+    <p>
+        <strong>Available retention strategies:</strong>
+    </p>
+    <ul>
+        <li>
+            <strong>Keep this agent online as much as possible:</strong>
+            <ul>
+                <li>Agent stays online continuously</li>
+                <li>VM keeps running after builds complete</li>
+                <li>Good for: Permanent agents, high-frequency builds</li>
+                <li>Resource usage: High (VM always running)</li>
+            </ul>
+        </li>
+        <li>
+            <strong>Take this agent online when in demand, and offline when idle:</strong>
+            <ul>
+                <li>Agent goes offline after configured idle period</li>
+                <li>Can be combined with "Max Idle Minutes" setting</li>
+                <li>Good for: On-demand agents, cost optimization</li>
+                <li>Resource usage: Medium (VM runs only when needed)</li>
+            </ul>
+        </li>
+        <li>
+            <strong>Take this agent online according to a schedule:</strong>
+            <ul>
+                <li>Agent comes online at specific times</li>
+                <li>Good for: Batch jobs, scheduled builds</li>
+                <li>Resource usage: Low (VM runs on schedule only)</li>
+            </ul>
+        </li>
+    </ul>
+    <p>
+        <strong>Proxmox-specific considerations:</strong>
+    </p>
+    <ul>
+        <li><strong>Snapshot revert:</strong> When agent disconnects, snapshot revert policy can restore clean state</li>
+        <li><strong>Instance cap:</strong> Retention strategy affects how many VMs are kept running</li>
+        <li><strong>Max idle minutes:</strong> Works with retention strategy to control VM lifecycle</li>
+        <li><strong>Cost optimization:</strong> Use demand-based retention to minimize resource usage</li>
+    </ul>
+    <p>
+        <strong>Recommendation:</strong> For cloud-provisioned Proxmox VMs, use
+        <strong>"Take this agent online when in demand, and offline when idle"</strong>
+        with appropriate "Max Idle Minutes" setting. This balances responsiveness with
+        resource efficiency and allows snapshot revert to maintain clean environments.
+    </p>
+</div>

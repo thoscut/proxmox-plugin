@@ -121,11 +121,11 @@
     </f:advanced>
 
     <!-- Launch Configuration -->
-    <f:entry title="${%Launch method}" help="/help/system-config/master-slave/launcher.html">
+    <f:entry title="${%Launch method}" help="${descriptor.getHelpFile('launcher')}">
         <f:hetero-radio field="launcher" descriptors="${h.getComputerLauncherDescriptors()}"/>
     </f:entry>
 
-    <f:entry title="${%Retention Strategy}" help="/help/system-config/master-slave/retention.html">
+    <f:entry title="${%Retention Strategy}" help="${descriptor.getHelpFile('retentionStrategy')}">
         <f:hetero-radio field="retentionStrategy" descriptors="${descriptor.retentionStrategyDescriptors}"/>
     </f:entry>
 
