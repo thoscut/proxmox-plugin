@@ -4,8 +4,10 @@ import hudson.Extension;
 import hudson.Util;
 import hudson.model.Computer;
 import hudson.model.Descriptor;
+import hudson.model.Executor;
 import hudson.model.Label;
 import hudson.model.Node;
+import hudson.model.Queue;
 import hudson.slaves.Cloud;
 import hudson.slaves.NodeProvisioner;
 import hudson.util.FormValidation;
@@ -646,10 +648,55 @@ public class Datacenter extends Cloud {
     }
 
     /**
+     * Check if a computer has builds that might resume after Jenkins restart.
+     * This is critical for Pipeline resumability support.
+     */
+    private boolean hasPotentiallyResumableBuilds(Computer computer) {
+        if (computer == null) {
+            return false;
+        }
+
+        try {
+            // Check if any executors are busy
+            for (Executor executor : computer.getExecutors()) {
+                if (executor.isBusy()) {
+                    LOGGER.log(Level.FINE, "Computer {0} has busy executor", computer.getName());
+                    return true;
+                }
+            }
+
+            // Check for builds in the queue assigned to this node
+            Node node = computer.getNode();
+            if (node != null) {
+                for (Queue.BuildableItem item : Jenkins.get().getQueue().getBuildableItems()) {
+                    // Check if this node can take this build item
+                    if (node.canTake(item) == null) {
+                        LOGGER.log(Level.FINE, "Computer {0} can accept queued build", computer.getName());
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "Error checking for resumable builds on " + computer.getName(), e);
+            // When in doubt, assume there might be resumable builds
+            return true;
+        }
+    }
+
+    /**
      * Determine if a node should be cleaned up based on its state and VM availability.
      */
     private boolean shouldCleanupNode(VirtualMachineSlave vmSlave, Computer computer) {
         try {
+            // NEVER cleanup if builds might resume after Jenkins restart
+            if (hasPotentiallyResumableBuilds(computer)) {
+                LOGGER.log(Level.FINE, "Preserving node with potential resumable builds: {0}", vmSlave.getNodeName());
+                return false;
+            }
+
             // Check if computer is manually set to offline permanently
             if (computer.isManualLaunchAllowed() && computer.isOffline() &&
                 computer.getOfflineCause() instanceof hudson.slaves.OfflineCause.UserCause) {
@@ -685,6 +732,7 @@ public class Datacenter extends Cloud {
             return false; // When in doubt, don't cleanup
         }
     }
+
 
     /**
      * Simple offline cause for cleanup operations.
@@ -738,6 +786,16 @@ public class Datacenter extends Cloud {
 
         public FormValidation doCheckRealm(@QueryParameter String value) {
             return emptyStringValidation("Realm", value);
+        }
+
+        /**
+         * Fills the realm dropdown with available authentication realms.
+         */
+        public ListBoxModel doFillRealmItems() {
+            ListBoxModel items = new ListBoxModel();
+            items.add("Proxmox VE (pve)", "pve");
+            items.add("Linux PAM (pam)", "pam");
+            return items;
         }
 
         /**
