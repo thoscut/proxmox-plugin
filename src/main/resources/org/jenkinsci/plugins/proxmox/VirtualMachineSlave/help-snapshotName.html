@@ -1,0 +1,21 @@
+<div>
+    <p>
+        <strong>Snapshot to Revert To</strong>
+    </p>
+    <p>
+        Select a snapshot to which the VM will be reverted based on the configured revert policy.
+        Snapshots allow you to restore the VM to a clean state after job execution.
+    </p>
+    <p>
+        <strong>When to use snapshots:</strong>
+    </p>
+    <ul>
+        <li><strong>Clean environment:</strong> Ensure each job starts with a pristine VM state</li>
+        <li><strong>Security:</strong> Remove any changes made during previous builds</li>
+        <li><strong>Consistency:</strong> Eliminate environmental drift between builds</li>
+    </ul>
+    <p>
+        <strong>Note:</strong> The snapshot must exist on the VM before it can be selected.
+        Create snapshots in Proxmox before configuring the agent.
+    </p>
+</div>

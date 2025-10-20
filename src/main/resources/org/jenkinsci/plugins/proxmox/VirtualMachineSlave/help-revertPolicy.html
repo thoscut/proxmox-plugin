@@ -1,0 +1,21 @@
+<div>
+    <p>
+        <strong>Snapshot Revert Policy</strong>
+    </p>
+    <p>
+        Determines when the VM should be reverted to the selected snapshot.
+    </p>
+    <p>
+        <strong>Available policies:</strong>
+    </p>
+    <ul>
+        <li><strong>Never:</strong> Don't revert the snapshot automatically</li>
+        <li><strong>Before launch:</strong> Revert to snapshot before starting the agent (ensures clean state)</li>
+        <li><strong>After disconnect:</strong> Revert to snapshot after the agent disconnects (cleanup)</li>
+        <li><strong>Both:</strong> Revert both before launch and after disconnect (maximum isolation)</li>
+    </ul>
+    <p>
+        <strong>Recommendation:</strong> Use "Before launch" or "Both" for reliable, repeatable builds
+        in clean environments.
+    </p>
+</div>

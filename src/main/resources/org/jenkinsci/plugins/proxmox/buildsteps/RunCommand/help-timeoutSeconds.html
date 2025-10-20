@@ -1,0 +1,26 @@
+<div>
+    <p>
+        <strong>Command Execution Timeout</strong>
+    </p>
+    <p>
+        Maximum time (in seconds) to wait for the command to complete.
+        If the command doesn't finish within this time, the build step will fail.
+    </p>
+    <p>
+        <strong>Recommendations:</strong>
+    </p>
+    <ul>
+        <li><strong>Quick commands:</strong> 30-60 seconds (status checks, simple operations)</li>
+        <li><strong>Service restarts:</strong> 60-300 seconds</li>
+        <li><strong>Deployments:</strong> 300-600 seconds</li>
+        <li><strong>Long-running tasks:</strong> 600-3600 seconds</li>
+    </ul>
+    <p>
+        <strong>Note:</strong> If "Wait for completion" is disabled, this timeout applies
+        to the initial command submission only, not the full execution.
+    </p>
+    <p>
+        <strong>Default:</strong> 300 seconds (5 minutes)<br>
+        <strong>Range:</strong> 1-3600 seconds (1 second to 1 hour)
+    </p>
+</div>

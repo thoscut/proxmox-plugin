@@ -1,0 +1,30 @@
+<div>
+    <p>
+        <strong>Command to Execute</strong>
+    </p>
+    <p>
+        The command to execute inside the virtual machine via the QEMU Guest Agent.
+        The command is executed as if typed in a shell on the guest OS.
+    </p>
+    <p>
+        <strong>Requirements:</strong>
+    </p>
+    <ul>
+        <li>QEMU Guest Agent must be installed and running in the VM</li>
+        <li>The command must be available in the VM's PATH or specified with full path</li>
+        <li>Proper permissions must be set for the guest agent user</li>
+    </ul>
+    <p>
+        <strong>Examples:</strong>
+    </p>
+    <ul>
+        <li>Linux: <code>systemctl restart nginx</code></li>
+        <li>Linux: <code>/usr/local/bin/deploy.sh --env production</code></li>
+        <li>Windows: <code>powershell.exe -Command "Restart-Service MyService"</code></li>
+        <li>Windows: <code>C:\Scripts\update.bat</code></li>
+    </ul>
+    <p>
+        <strong>Note:</strong> Multi-line scripts should be written as a single command,
+        or stored as a script file in the VM and executed by path.
+    </p>
+</div>
