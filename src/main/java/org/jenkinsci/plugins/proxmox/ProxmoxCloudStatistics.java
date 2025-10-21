@@ -29,7 +29,7 @@ public class ProxmoxCloudStatistics implements Serializable {
     private static final Map<String, ProxmoxCloudStatistics> STATISTICS = new ConcurrentHashMap<>();
     
     private final String datacenterDescription;
-    private final Datacenter datacenter;
+    private final transient Datacenter datacenter;
     
     // Provisioning Statistics
     private long totalProvisioningAttempts = 0;
@@ -183,7 +183,8 @@ public class ProxmoxCloudStatistics implements Serializable {
                     if (computer != null) {
                         if (computer.isOnline()) {
                             online++;
-                        } else if (computer.isTemporarilyOffline()) {
+                        } else if (computer.isOffline() && !(computer.getOfflineCause() instanceof hudson.slaves.OfflineCause.UserCause)) {
+                            // Offline but not manually by user = temporarily offline
                             tempOffline++;
                         } else {
                             offline++;

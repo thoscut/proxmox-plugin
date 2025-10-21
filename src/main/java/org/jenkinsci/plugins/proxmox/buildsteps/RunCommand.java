@@ -213,7 +213,7 @@ public class RunCommand extends ProxmoxBuildStep {
                 for (hudson.slaves.Cloud cloud : Jenkins.get().clouds) {
                     if (cloud instanceof org.jenkinsci.plugins.proxmox.Datacenter) {
                         org.jenkinsci.plugins.proxmox.Datacenter dc = (org.jenkinsci.plugins.proxmox.Datacenter) cloud;
-                        if (datacenter.getDatacenterDescription().equals(datacenterDescription)) {
+                        if (dc.getDatacenterDescription().equals(datacenterDescription)) {
                             datacenter = dc;
                             break;
                         }

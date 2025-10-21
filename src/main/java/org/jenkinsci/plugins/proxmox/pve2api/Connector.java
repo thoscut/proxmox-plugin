@@ -686,7 +686,11 @@ public class Connector {
         return sanitized;
     }
 
-    protected void finalize() {
+    /**
+     * Cleanup resources. Should be called when the connector is no longer needed.
+     * Note: Replaced deprecated finalize() with explicit cleanup method.
+     */
+    public void close() {
         unirest.shutDown();
     }
 }

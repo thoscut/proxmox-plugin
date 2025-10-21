@@ -523,7 +523,7 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
                     if (vmSlave.getComputer() != null) {
                         if (!vmSlave.getComputer().isOffline()) {
                             onlineCount++;
-                        } else if (vmSlave.getComputer().isTemporarilyOffline()) {
+                        } else if (vmSlave.getComputer().isOffline() && !(vmSlave.getComputer().getOfflineCause() instanceof hudson.slaves.OfflineCause.UserCause)) {
                             tempOfflineCount++;
                         } else {
                             offlineCount++;

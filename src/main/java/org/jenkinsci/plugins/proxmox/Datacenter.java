@@ -14,7 +14,6 @@ import hudson.util.FormValidation;
 import hudson.util.Secret;
 import hudson.util.ListBoxModel;
 import com.cloudbees.plugins.credentials.CredentialsProvider;
-import com.cloudbees.plugins.credentials.common.StandardCredentials;
 import com.cloudbees.plugins.credentials.common.StandardListBoxModel;
 import com.cloudbees.plugins.credentials.common.StandardUsernamePasswordCredentials;
 import com.cloudbees.plugins.credentials.domains.DomainRequirement;
@@ -75,6 +74,11 @@ public class Datacenter extends Cloud {
         this(hostname, null, realm, ignoreSSL, null, 0);
         // For legacy instances, we'll need to handle credentials differently
         // This will be handled by the credential resolution method
+    }
+
+    @Override
+    public Collection<NodeProvisioner.PlannedNode> provision(hudson.slaves.Cloud.CloudState state, int excessWorkload) {
+        return provision(state.getLabel(), excessWorkload);
     }
 
     public Collection<NodeProvisioner.PlannedNode> provision(Label label, int excessWorkload) {
@@ -145,6 +149,11 @@ public class Datacenter extends Cloud {
         return plannedNodes;
     }
 
+    @Override
+    public boolean canProvision(hudson.slaves.Cloud.CloudState state) {
+        return canProvision(state.getLabel());
+    }
+
     public boolean canProvision(Label label) {
         LOGGER.log(Level.FINE, "canProvision called for datacenter {0} with label {1}",
                   new Object[]{getDatacenterDescription(), label});
@@ -209,7 +218,8 @@ public class Datacenter extends Cloud {
                 Node result = template.provision(Datacenter.this, plannedNodeName);
 
                 // Set the provisioning ID on the node for cloud-stats tracking
-                if (result instanceof VirtualMachineSlave) {
+                // template.provision() always returns VirtualMachineSlave, but check defensively
+                if (result != null) {
                     ((VirtualMachineSlave) result).setProvisioningId(provisioningId);
                 }
 
@@ -267,10 +277,10 @@ public class Datacenter extends Cloud {
             return null;
         }
 
-        List<StandardUsernamePasswordCredentials> credentials = CredentialsProvider.lookupCredentials(
+        List<StandardUsernamePasswordCredentials> credentials = CredentialsProvider.lookupCredentialsInItemGroup(
             StandardUsernamePasswordCredentials.class,
             Jenkins.get(),
-            ACL.SYSTEM,
+            ACL.SYSTEM2,
             Collections.<DomainRequirement>emptyList()
         );
 
@@ -512,6 +522,11 @@ public class Datacenter extends Cloud {
         VirtualMachineSlaveComputer vmComputer = (VirtualMachineSlaveComputer) computer;
         VirtualMachineSlave vmSlave = (VirtualMachineSlave) vmComputer.getNode();
 
+        if (vmSlave == null) {
+            LOGGER.log(Level.WARNING, "Cannot terminate: vmSlave node is null");
+            return;
+        }
+
         LOGGER.log(Level.INFO, "Terminating VM slave: {0} (VM ID: {1}) on node: {2}",
                   new Object[]{vmSlave.getNodeName(), vmSlave.getVirtualMachineId().toString(), vmSlave.getDatacenterNode()});
 
@@ -565,7 +580,7 @@ public class Datacenter extends Cloud {
                       new Object[]{vmSlave.getNodeName(), vmId.toString()});
 
             // Delete the VM using the Proxmox API
-            String deleteResult = proxmoxApi.deleteQemuMachine(nodeName, vmId);
+            proxmoxApi.deleteQemuMachine(nodeName, vmId);
 
             // Remove the node from Jenkins
             Jenkins jenkins = Jenkins.get();
@@ -574,7 +589,7 @@ public class Datacenter extends Cloud {
             LOGGER.log(Level.INFO, "Successfully terminated and cleaned up VM slave: {0} (ID: {1})",
                       new Object[]{vmSlave.getNodeName(), vmId.toString()});
 
-        } catch (Exception e) {
+        } catch (LoginException | java.io.IOException e) {
             LOGGER.log(Level.SEVERE, "Failed to terminate VM slave: " + vmSlave.getNodeName() +
                       " (ID: " + vmSlave.getVirtualMachineId().toString() + ")", e);
 
@@ -805,7 +820,7 @@ public class Datacenter extends Cloud {
             Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             return new StandardListBoxModel()
                 .includeEmptyValue()
-                .includeAs(ACL.SYSTEM, Jenkins.get(), StandardUsernamePasswordCredentials.class);
+                .includeAs(ACL.SYSTEM2, Jenkins.get(), StandardUsernamePasswordCredentials.class);
         }
 
         @POST
@@ -824,10 +839,10 @@ public class Datacenter extends Cloud {
                 }
 
                 // Resolve credentials
-                List<StandardUsernamePasswordCredentials> credentials = CredentialsProvider.lookupCredentials(
+                List<StandardUsernamePasswordCredentials> credentials = CredentialsProvider.lookupCredentialsInItemGroup(
                     StandardUsernamePasswordCredentials.class,
                     Jenkins.get(),
-                    ACL.SYSTEM,
+                    ACL.SYSTEM2,
                     Collections.<DomainRequirement>emptyList()
                 );
 

@@ -38,9 +38,9 @@ public class VirtualMachineSlaveComputer extends AbstractCloudComputer<VirtualMa
             return;
         }
 
-        // Don't try to reconnect if manually taken offline (not temporarily offline)
+        // Don't try to reconnect if manually taken offline by user
         // BUT allow connection if the node has never been connected before (first launch)
-        if (isOffline() && !isTemporarilyOffline() && getOfflineCause() != null) {
+        if (isOffline() && getOfflineCause() instanceof hudson.slaves.OfflineCause.UserCause) {
             getListener().getLogger().println("INFO: Node is manually offline, skipping reconnection attempt");
             return;
         }

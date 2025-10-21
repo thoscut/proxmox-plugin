@@ -1,8 +1,5 @@
 package org.jenkinsci.plugins.proxmox;
 
-import static java.util.Collections.emptyList;
-import static java.util.Optional.ofNullable;
-
 import hudson.Extension;
 import hudson.model.Computer;
 import hudson.model.Descriptor;
@@ -55,7 +52,7 @@ public class VirtualMachineSlave extends AbstractCloudSlave implements TrackedIt
             Mode mode,
             String labelString,
             ComputerLauncher delegateLauncher,
-            RetentionStrategy retentionStrategy,
+            RetentionStrategy<?> retentionStrategy,
             List<? extends NodeProperty<?>> nodeProperties,
             String datacenterDescription,
             String datacenterNode,
@@ -67,11 +64,7 @@ public class VirtualMachineSlave extends AbstractCloudSlave implements TrackedIt
             throws IOException, Descriptor.FormException {
         super(
                 name,
-                nodeDescription,
                 remoteFS,
-                numExecutors,
-                mode,
-                labelString,
                 new VirtualMachineLauncher(
                         delegateLauncher,
                         datacenterDescription,
@@ -80,9 +73,17 @@ public class VirtualMachineSlave extends AbstractCloudSlave implements TrackedIt
                         snapshotName,
                         startVM,
                         startupWaitingPeriodSeconds,
-                        revertPolicy),
-                retentionStrategy,
-                ofNullable(nodeProperties).orElse(emptyList()));
+                        revertPolicy));
+        // Set properties that were removed from the simplified constructor
+        setNodeDescription(nodeDescription);
+        setNumExecutors(Integer.parseInt(numExecutors));
+        setMode(mode);
+        setLabelString(labelString);
+        setRetentionStrategy(retentionStrategy);
+        if (nodeProperties != null && !nodeProperties.isEmpty()) {
+            getNodeProperties().replaceBy(nodeProperties);
+        }
+
         this.datacenterDescription = datacenterDescription;
         this.datacenterNode = datacenterNode;
         this.virtualMachineId = virtualMachineId;
