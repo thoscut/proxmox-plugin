@@ -62,6 +62,7 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
     private final boolean runPostCloneCommand;
     private boolean waitForGuestAgent;
     private int waitForGuestAgentTimeoutSeconds;
+    private final boolean forceCleanupRunningVMs;
 
     private transient Set<LabelAtom> labelSet;
     private transient AtomicInteger currentlyProvisioning = new AtomicInteger(0);
@@ -85,7 +86,8 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
                                    List<? extends NodeProperty<?>> nodeProperties,
                                    String postCloneCommand,
                                    int postCloneCommandTimeout,
-                                   boolean runPostCloneCommand) {
+                                   boolean runPostCloneCommand,
+                                   boolean forceCleanupRunningVMs) {
         this.templateName = templateName;
         this.labels = labels;
         this.remoteFS = remoteFS;
@@ -105,6 +107,7 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
         this.postCloneCommand = postCloneCommand;
         this.postCloneCommandTimeout = postCloneCommandTimeout > 0 ? postCloneCommandTimeout : 300;
         this.runPostCloneCommand = runPostCloneCommand;
+        this.forceCleanupRunningVMs = forceCleanupRunningVMs;
         // Default values for new fields (will be set via setters or readResolve)
         this.waitForGuestAgent = false;
         this.waitForGuestAgentTimeoutSeconds = 120;
@@ -231,11 +234,34 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
         }
     }
 
+    /**
+     * Get a short Jenkins instance identifier.
+     * Uses a hash of the Jenkins root URL for consistent identification across restarts.
+     */
+    private static String getJenkinsInstanceId() {
+        try {
+            String rootUrl = Jenkins.get().getRootUrl();
+            if (rootUrl != null && !rootUrl.isEmpty()) {
+                // Use hash of root URL for consistent short ID
+                int hash = rootUrl.hashCode();
+                return String.format("%08x", hash & 0xFFFFFFFFL);
+            }
+            // Fallback: use Jenkins version + startup time hash
+            String version = Jenkins.get().VERSION;
+            long startTime = Jenkins.get().getInitLevel().ordinal();
+            int hash = (version + startTime).hashCode();
+            return String.format("%08x", hash & 0xFFFFFFFFL);
+        } catch (Exception e) {
+            LOGGER.log(Level.FINE, "Could not get Jenkins instance identifier, using default", e);
+            return "00000000";
+        }
+    }
+
     private String generateCloneName(Connector proxmoxApi) throws LoginException {
         // Get the actual template VM name from Proxmox using the template VM ID
         HashMap<String, Integer> machines = proxmoxApi.getQemuMachines(datacenterNode);
         Integer templateVmIdInt = Integer.parseInt(templateVmId);
-        
+
         String actualTemplateName = null;
         for (Map.Entry<String, Integer> entry : machines.entrySet()) {
             if (entry.getValue().equals(templateVmIdInt)) {
@@ -243,15 +269,17 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
                 break;
             }
         }
-        
+
         // Fallback to configured template name if not found
         if (actualTemplateName == null) {
             LOGGER.log(Level.WARNING, "Could not find template VM with ID {0}, using configured template name: {1}",
                       new Object[]{templateVmId.toString(), templateName});
             actualTemplateName = templateName;
         }
-        
-        return actualTemplateName + "-" + System.currentTimeMillis();
+
+        // Include Jenkins instance ID in VM name to identify which Jenkins instance created it
+        String instanceId = getJenkinsInstanceId();
+        return actualTemplateName + "-" + instanceId + "-" + System.currentTimeMillis();
     }
 
     private Integer cloneVmFromTemplate(Connector proxmoxApi, String cloneName) throws LoginException {
@@ -725,6 +753,7 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
     public boolean getRunPostCloneCommand() { return runPostCloneCommand; }
     public boolean getWaitForGuestAgent() { return waitForGuestAgent; }
     public int getWaitForGuestAgentTimeoutSeconds() { return waitForGuestAgentTimeoutSeconds; }
+    public boolean getForceCleanupRunningVMs() { return forceCleanupRunningVMs; }
 
     @Extension
     public static class DescriptorImpl extends Descriptor<ProxmoxCloudSlaveTemplate> {

@@ -1,0 +1,29 @@
+<div>
+    <p>
+        <strong>Force Cleanup of Running Orphaned VMs</strong>
+    </p>
+    <p>
+        By default, the periodic cleanup task will NOT delete orphaned VMs (VMs without a corresponding Jenkins node)
+        if they are currently running. This is a safety measure to prevent accidental deletion of VMs that might be
+        in use.
+    </p>
+    <p>
+        Enable this option to allow cleanup of orphaned VMs even when they are running.
+    </p>
+    <p>
+        <strong>When to enable:</strong>
+    </p>
+    <ul>
+        <li>You have VMs that sometimes get stuck in a running state after Jenkins restarts</li>
+        <li>You want aggressive cleanup of all orphaned VMs regardless of their state</li>
+        <li>Your VMs are ephemeral and it's safe to forcefully delete them</li>
+    </ul>
+    <p>
+        <strong>Warning:</strong> Use this option with caution! Enabling this will delete running VMs that don't have
+        a Jenkins node, which could cause issues if there are legitimate reasons for VMs to be running without nodes.
+    </p>
+    <p>
+        <strong>How it works:</strong> The cleanup task runs hourly and checks for VMs whose name matches this template's
+        pattern but don't have a corresponding Jenkins node. With this option enabled, such VMs will be deleted even if running.
+    </p>
+</div>

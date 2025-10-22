@@ -12,9 +12,7 @@ import hudson.util.Secret;
 import org.jenkinsci.plugins.proxmox.pve2api.MockProxmoxConnector;
 import org.jvnet.hudson.test.JenkinsRule;
 
-import java.io.IOException;
 import java.util.Collections;
-import hudson.model.Descriptor;
 
 /**
  * Utility class providing common test fixtures and helper methods.
@@ -188,7 +186,8 @@ public class TestUtilities {
             Collections.emptyList(),
             null,
             60,
-            false
+            false,
+            false  // forceCleanupRunningVMs
         );
         // Set optional fields via setters
         template.setWaitForGuestAgent(false);
@@ -222,7 +221,8 @@ public class TestUtilities {
             Collections.emptyList(),
             null,
             60,
-            false
+            false,
+            false  // forceCleanupRunningVMs
         );
         // Set optional fields via setters
         template.setWaitForGuestAgent(true);

@@ -96,7 +96,7 @@ public class Datacenter extends Cloud {
         }
 
         if (templates == null || templates.isEmpty()) {
-            LOGGER.log(Level.WARNING, "Provision: No templates configured for datacenter {0}",
+            LOGGER.log(Level.FINE, "Provision: No templates configured for datacenter {0}",
                       getDatacenterDescription());
             return plannedNodes;
         }
@@ -166,7 +166,7 @@ public class Datacenter extends Cloud {
         }
 
         if (templates == null || templates.isEmpty()) {
-            LOGGER.log(Level.WARNING, "canProvision: No templates configured for datacenter {0}",
+            LOGGER.log(Level.FINE, "canProvision: No templates configured for datacenter {0}",
                       getDatacenterDescription());
             return false;
         }
@@ -610,7 +610,7 @@ public class Datacenter extends Cloud {
      * and removes any that cannot be reached or are no longer valid.
      */
     public void cleanupOrphanedNodes() {
-        LOGGER.log(Level.INFO, "Starting cleanup of orphaned nodes for datacenter: {0}", getDatacenterDescription());
+        LOGGER.log(Level.FINE, "Starting cleanup of orphaned nodes for datacenter: {0}", getDatacenterDescription());
 
         List<VirtualMachineSlave> nodesToRemove = new ArrayList<>();
 
@@ -659,6 +659,184 @@ public class Datacenter extends Cloud {
         } else {
             LOGGER.log(Level.INFO, "Cleaned up {0} orphaned nodes for datacenter: {1}",
                       new Object[]{nodesToRemove.size(), getDatacenterDescription()});
+        }
+
+        // Also cleanup orphaned VMs in Proxmox (VMs that lost their Jenkins nodes)
+        cleanupOrphanedVMs();
+    }
+
+    /**
+     * Clean up orphaned VMs in Proxmox that no longer have corresponding Jenkins nodes.
+     * This handles the case where Jenkins node was removed but VM deletion in Proxmox failed
+     * (e.g., during Jenkins restart).
+     */
+    private void cleanupOrphanedVMs() {
+        LOGGER.log(Level.FINE, "Starting cleanup of orphaned VMs in Proxmox for datacenter: {0}",
+                   getDatacenterDescription());
+
+        try {
+            Connector proxmoxApi = proxmoxInstance();
+
+            // Get all existing Jenkins nodes for this datacenter
+            Map<Integer, VirtualMachineSlave> jenkinsVMs = new HashMap<>();
+            for (Node node : Jenkins.get().getNodes()) {
+                if (node instanceof VirtualMachineSlave) {
+                    VirtualMachineSlave vmSlave = (VirtualMachineSlave) node;
+                    if (getDatacenterDescription().equals(vmSlave.getDatacenterDescription())) {
+                        jenkinsVMs.put(vmSlave.getVirtualMachineId(), vmSlave);
+                    }
+                }
+            }
+
+            // Check each template's VMs in Proxmox
+            if (templates != null) {
+                for (ProxmoxCloudSlaveTemplate template : templates) {
+                    try {
+                        cleanupOrphanedVMsForTemplate(proxmoxApi, template, jenkinsVMs);
+                    } catch (Exception e) {
+                        LOGGER.log(Level.WARNING, "Failed to cleanup orphaned VMs for template: " +
+                                  template.getTemplateName(), e);
+                    }
+                }
+            }
+
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "Failed to cleanup orphaned VMs in Proxmox", e);
+        }
+    }
+
+    /**
+     * Get Jenkins instance identifier matching the one used in VM names.
+     */
+    private static String getJenkinsInstanceId() {
+        try {
+            String rootUrl = Jenkins.get().getRootUrl();
+            if (rootUrl != null && !rootUrl.isEmpty()) {
+                int hash = rootUrl.hashCode();
+                return String.format("%08x", hash & 0xFFFFFFFFL);
+            }
+            String version = Jenkins.VERSION;
+            long startTime = Jenkins.get().getInitLevel().ordinal();
+            int hash = (version + startTime).hashCode();
+            return String.format("%08x", hash & 0xFFFFFFFFL);
+        } catch (Exception e) {
+            LOGGER.log(Level.FINE, "Could not get Jenkins instance identifier, using default", e);
+            return "00000000";
+        }
+    }
+
+    /**
+     * Check if a VM name belongs to this Jenkins instance.
+     * VM names follow pattern: templateName-instanceId-timestamp
+     */
+    private boolean belongsToThisInstance(String vmName, String templateName) {
+        if (!vmName.startsWith(templateName)) {
+            return false;
+        }
+
+        String instanceId = getJenkinsInstanceId();
+        // Check if VM name contains this instance's ID
+        // Pattern: templateName-instanceId-timestamp
+        String expectedPrefix = templateName + "-" + instanceId + "-";
+        boolean matches = vmName.startsWith(expectedPrefix);
+
+        if (!matches) {
+            LOGGER.log(Level.FINEST, "VM {0} does not belong to this instance (expected prefix: {1})",
+                      new Object[]{vmName, expectedPrefix});
+        }
+
+        return matches;
+    }
+
+    /**
+     * Cleanup orphaned VMs for a specific template.
+     */
+    private void cleanupOrphanedVMsForTemplate(Connector proxmoxApi,
+                                                ProxmoxCloudSlaveTemplate template,
+                                                Map<Integer, VirtualMachineSlave> jenkinsVMs)
+            throws Exception {
+
+        // Get the datacenter node from the template
+        String nodeName = template.getDatacenterNode();
+        if (nodeName == null || nodeName.isEmpty()) {
+            LOGGER.log(Level.FINE, "Template {0} has no datacenter node configured",
+                      template.getTemplateName());
+            return;
+        }
+
+        try {
+            // Get all VMs on this node
+            HashMap<String, Integer> vms = proxmoxApi.getQemuMachines(nodeName);
+
+            for (Map.Entry<String, Integer> entry : vms.entrySet()) {
+                String vmName = entry.getKey();
+                int vmId = entry.getValue();
+
+                // Never delete the template VM itself
+                if (template.getTemplateVmId() != null &&
+                    String.valueOf(vmId).equals(template.getTemplateVmId())) {
+                    LOGGER.log(Level.FINEST, "Skipping template VM {0} (ID: {1})",
+                              new Object[]{vmName, vmId});
+                    continue;
+                }
+
+                // Check if this VM belongs to this Jenkins instance
+                if (!belongsToThisInstance(vmName, template.getTemplateName())) {
+                    LOGGER.log(Level.FINEST, "Skipping VM {0} (ID: {1}) - belongs to different Jenkins instance",
+                              new Object[]{vmName, vmId});
+                    continue;
+                }
+
+                // Check if Jenkins has a node for this VM
+                if (jenkinsVMs.containsKey(vmId)) {
+                    // VM has a Jenkins node, check if it has resumable builds
+                    VirtualMachineSlave vmSlave = jenkinsVMs.get(vmId);
+                    Computer computer = vmSlave.toComputer();
+                    if (computer != null && hasPotentiallyResumableBuilds(computer)) {
+                        LOGGER.log(Level.FINE, "Preserving VM {0} (ID: {1}) - has resumable builds",
+                                  new Object[]{vmName, vmId});
+                        continue;
+                    }
+                    // VM has Jenkins node but no resumable builds - skip cleanup
+                    // (will be cleaned up when the Jenkins node is properly terminated)
+                    continue;
+                }
+
+                // VM doesn't have a Jenkins node (orphaned in Proxmox)
+                // Check if VM is running - don't delete running VMs unless forced
+                try {
+                    boolean isRunning = proxmoxApi.isQemuMachineRunning(nodeName, vmId);
+                    if (isRunning && !template.getForceCleanupRunningVMs()) {
+                        LOGGER.log(Level.WARNING, "Found orphaned VM {0} (ID: {1}) but it's running - not deleting (forceCleanupRunningVMs=false)",
+                                  new Object[]{vmName, vmId});
+                        continue;
+                    }
+                    if (isRunning && template.getForceCleanupRunningVMs()) {
+                        LOGGER.log(Level.INFO, "Found orphaned VM {0} (ID: {1}) that is running - will force delete (forceCleanupRunningVMs=true)",
+                                  new Object[]{vmName, vmId});
+                    }
+                } catch (Exception statusEx) {
+                    LOGGER.log(Level.FINE, "Could not get status for VM {0} (ID: {1}): {2}",
+                              new Object[]{vmName, vmId, statusEx.getMessage()});
+                }
+
+                // Safe to delete this orphaned VM
+                LOGGER.log(Level.INFO, "Deleting orphaned VM in Proxmox: {0} (ID: {1}) on node {2}",
+                          new Object[]{vmName, vmId, nodeName});
+
+                try {
+                    proxmoxApi.deleteQemuMachine(nodeName, vmId);
+                    LOGGER.log(Level.INFO, "Successfully deleted orphaned VM: {0} (ID: {1})",
+                              new Object[]{vmName, vmId});
+                    getStatistics().recordTermination();
+                } catch (Exception deleteEx) {
+                    LOGGER.log(Level.WARNING, "Failed to delete orphaned VM " + vmName +
+                              " (ID: " + vmId + "): " + deleteEx.getMessage(), deleteEx);
+                }
+            }
+
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "Failed to check VMs on node: " + nodeName, e);
         }
     }
 
