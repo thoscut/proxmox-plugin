@@ -1,0 +1,142 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout" xmlns:f="/lib/form">
+    <l:header>
+        <style>
+            .proxmox-vm-info {
+                background: #f9f9f9;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                padding: 12px;
+                margin: 10px 0;
+            }
+            .proxmox-vm-info h3 {
+                margin-top: 0;
+                color: #333;
+                border-bottom: 2px solid #4CAF50;
+                padding-bottom: 5px;
+            }
+            .proxmox-info-table {
+                width: 100%;
+                border-collapse: collapse;
+            }
+            .proxmox-info-table td {
+                padding: 6px 8px;
+                border-bottom: 1px solid #eee;
+            }
+            .proxmox-info-table td:first-child {
+                font-weight: bold;
+                width: 40%;
+                color: #666;
+            }
+            .proxmox-info-table td:last-child {
+                color: #333;
+            }
+            .proxmox-info-table tr:last-child td {
+                border-bottom: none;
+            }
+            .proxmox-badge {
+                display: inline-block;
+                padding: 3px 8px;
+                border-radius: 3px;
+                font-size: 0.9em;
+                font-weight: bold;
+            }
+            .proxmox-badge-success {
+                background: #4CAF50;
+                color: white;
+            }
+            .proxmox-badge-info {
+                background: #2196F3;
+                color: white;
+            }
+            .proxmox-badge-warning {
+                background: #FF9800;
+                color: white;
+            }
+        </style>
+    </l:header>
+
+    <div class="proxmox-vm-info">
+        <h3>Proxmox VM Information</h3>
+        <table class="proxmox-info-table">
+            <tr>
+                <td>VM ID:</td>
+                <td><strong>${it.vmId}</strong></td>
+            </tr>
+            <tr>
+                <td>Proxmox Node:</td>
+                <td>${it.proxmoxNode}</td>
+            </tr>
+            <tr>
+                <td>Datacenter:</td>
+                <td>${it.datacenterDescription}</td>
+            </tr>
+            <tr>
+                <td>Snapshot:</td>
+                <td>
+                    <j:choose>
+                        <j:when test="${it.snapshotName != 'None' and it.snapshotName != null}">
+                            <span class="proxmox-badge proxmox-badge-info">${it.snapshotName}</span>
+                        </j:when>
+                        <j:otherwise>
+                            <span style="color: #999;">No snapshot configured</span>
+                        </j:otherwise>
+                    </j:choose>
+                </td>
+            </tr>
+            <tr>
+                <td>Revert Policy:</td>
+                <td>
+                    <j:choose>
+                        <j:when test="${it.revertPolicy == 'NEVER'}">
+                            <span style="color: #999;">Never</span>
+                        </j:when>
+                        <j:when test="${it.revertPolicy == 'BEFORE_JOB'}">
+                            <span class="proxmox-badge proxmox-badge-warning">Before Job</span>
+                        </j:when>
+                        <j:when test="${it.revertPolicy == 'AFTER_JOB'}">
+                            <span class="proxmox-badge proxmox-badge-info">After Job</span>
+                        </j:when>
+                        <j:otherwise>
+                            ${it.revertPolicy}
+                        </j:otherwise>
+                    </j:choose>
+                </td>
+            </tr>
+            <tr>
+                <td>Auto-start VM:</td>
+                <td>
+                    <j:choose>
+                        <j:when test="${it.startVmEnabled}">
+                            <span class="proxmox-badge proxmox-badge-success">Enabled</span>
+                        </j:when>
+                        <j:otherwise>
+                            <span style="color: #999;">Disabled</span>
+                        </j:otherwise>
+                    </j:choose>
+                </td>
+            </tr>
+            <j:if test="${it.startVmEnabled}">
+                <tr>
+                    <td>Startup Wait Time:</td>
+                    <td>${it.startupWaitTime} seconds</td>
+                </tr>
+            </j:if>
+            <j:if test="${it.hasLimitedBuilds()}">
+                <tr>
+                    <td>Limited Builds:</td>
+                    <td>
+                        <span class="proxmox-badge proxmox-badge-warning">
+                            ${it.buildsExecuted} / ${it.limitedBuildsCount}
+                        </span>
+                        <j:if test="${it.buildsExecuted >= it.limitedBuildsCount}">
+                            <span style="color: #f44336; margin-left: 8px;">⚠ Limit reached</span>
+                        </j:if>
+                    </td>
+                </tr>
+            </j:if>
+        </table>
+    </div>
+
+    <st:include it="${it}" page="sidepanel.jelly" optional="true"/>
+</j:jelly>

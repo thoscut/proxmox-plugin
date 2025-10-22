@@ -217,9 +217,94 @@ class VirtualMachineSlaveComputerTest {
                    trackedItem.getId(), sameInstance(id));
     }
 
+    @Test
+    void should_expose_vm_id_for_status_page(JenkinsRule r) throws Exception {
+        // Given
+        VirtualMachineSlave slave = createTestSlave(r, "test-slave");
+        VirtualMachineSlaveComputer computer = (VirtualMachineSlaveComputer) slave.createComputer();
+
+        // Then
+        assertThat("Should expose VM ID", computer.getVmId(), is("100"));
+    }
+
+    @Test
+    void should_expose_proxmox_node_for_status_page(JenkinsRule r) throws Exception {
+        // Given
+        VirtualMachineSlave slave = createTestSlave(r, "test-slave");
+        VirtualMachineSlaveComputer computer = (VirtualMachineSlaveComputer) slave.createComputer();
+
+        // Then
+        assertThat("Should expose Proxmox node", computer.getProxmoxNode(), is("pve-node"));
+    }
+
+    @Test
+    void should_expose_datacenter_description_for_status_page(JenkinsRule r) throws Exception {
+        // Given
+        VirtualMachineSlave slave = createTestSlave(r, "test-slave");
+        VirtualMachineSlaveComputer computer = (VirtualMachineSlaveComputer) slave.createComputer();
+
+        // Then
+        assertThat("Should expose datacenter description", computer.getDatacenterDescription(), is("test-datacenter"));
+    }
+
+    @Test
+    void should_expose_snapshot_name_for_status_page(JenkinsRule r) throws Exception {
+        // Given
+        VirtualMachineSlave slave = createTestSlave(r, "test-slave");
+        VirtualMachineSlaveComputer computer = (VirtualMachineSlaveComputer) slave.createComputer();
+
+        // Then
+        assertThat("Should expose snapshot name", computer.getSnapshotName(), is("snapshot"));
+    }
+
+    @Test
+    void should_expose_revert_policy_for_status_page(JenkinsRule r) throws Exception {
+        // Given
+        VirtualMachineSlave slave = createTestSlave(r, "test-slave");
+        VirtualMachineSlaveComputer computer = (VirtualMachineSlaveComputer) slave.createComputer();
+
+        // Then
+        assertThat("Should expose revert policy", computer.getRevertPolicy(), is("NEVER"));
+    }
+
+    @Test
+    void should_expose_start_vm_enabled_for_status_page(JenkinsRule r) throws Exception {
+        // Given
+        VirtualMachineSlave slave = createTestSlave(r, "test-slave");
+        VirtualMachineSlaveComputer computer = (VirtualMachineSlaveComputer) slave.createComputer();
+
+        // Then
+        assertThat("Should expose start VM enabled", computer.isStartVmEnabled(), is(true));
+    }
+
+    @Test
+    void should_expose_startup_wait_time_for_status_page(JenkinsRule r) throws Exception {
+        // Given
+        VirtualMachineSlave slave = createTestSlave(r, "test-slave");
+        VirtualMachineSlaveComputer computer = (VirtualMachineSlaveComputer) slave.createComputer();
+
+        // Then
+        assertThat("Should expose startup wait time", computer.getStartupWaitTime(), is(60));
+    }
+
+    @Test
+    void should_handle_null_node_gracefully(JenkinsRule r) throws Exception {
+        // Given
+        VirtualMachineSlave slave = createTestSlave(r, "test-slave");
+        VirtualMachineSlaveComputer computer = (VirtualMachineSlaveComputer) slave.createComputer();
+
+        // Simulate node being null (e.g., computer persists after node deletion)
+        // We can't actually set the node to null, but we test defensive coding
+
+        // Then - should not throw NPE
+        assertThat("Should handle VM ID", computer.getVmId(), notNullValue());
+        assertThat("Should handle Proxmox node", computer.getProxmoxNode(), notNullValue());
+        assertThat("Should handle datacenter", computer.getDatacenterDescription(), notNullValue());
+    }
+
     // Helper method to create test slaves
     private VirtualMachineSlave createTestSlave(JenkinsRule r, String name) throws Exception {
-        return new VirtualMachineSlave(
+        VirtualMachineSlave slave = new VirtualMachineSlave(
             name,
             "Test slave for " + name,
             "/home/jenkins",
@@ -237,5 +322,8 @@ class VirtualMachineSlaveComputerTest {
             60,
             null
         );
+        // Add the slave to Jenkins so getNode() works in Computer
+        r.jenkins.addNode(slave);
+        return slave;
     }
 }

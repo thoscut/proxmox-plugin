@@ -255,4 +255,59 @@ public class VirtualMachineSlaveComputer extends AbstractCloudComputer<VirtualMa
         }
         return null;
     }
+
+    // VM details for status page display
+    public String getVmId() {
+        VirtualMachineSlave node = getNode();
+        return node != null ? String.valueOf(node.getVirtualMachineId()) : "Unknown";
+    }
+
+    public String getProxmoxNode() {
+        VirtualMachineSlave node = getNode();
+        return node != null ? node.getDatacenterNode() : "Unknown";
+    }
+
+    public String getDatacenterDescription() {
+        VirtualMachineSlave node = getNode();
+        return node != null ? node.getDatacenterDescription() : "Unknown";
+    }
+
+    public String getSnapshotName() {
+        VirtualMachineSlave node = getNode();
+        return node != null ? node.getSnapshotName() : "None";
+    }
+
+    public String getRevertPolicy() {
+        VirtualMachineSlave node = getNode();
+        if (node != null) {
+            VirtualMachineLauncher.RevertPolicy policy = node.getRevertPolicy();
+            return policy != null ? policy.toString() : "NEVER";
+        }
+        return "NEVER";
+    }
+
+    public boolean isStartVmEnabled() {
+        VirtualMachineSlave node = getNode();
+        return node != null && node.getStartVM();
+    }
+
+    public int getStartupWaitTime() {
+        VirtualMachineSlave node = getNode();
+        return node != null ? node.getStartupWaitingPeriodSeconds() : 0;
+    }
+
+    public Integer getLimitedBuildsCount() {
+        VirtualMachineSlave node = getNode();
+        return node != null ? node.getLimitedBuildsCount() : null;
+    }
+
+    public Integer getBuildsExecuted() {
+        VirtualMachineSlave node = getNode();
+        return node != null ? node.getBuildsExecuted() : null;
+    }
+
+    public boolean hasLimitedBuilds() {
+        VirtualMachineSlave node = getNode();
+        return node != null && node.getLimitedBuildsCount() > 0;
+    }
 }
