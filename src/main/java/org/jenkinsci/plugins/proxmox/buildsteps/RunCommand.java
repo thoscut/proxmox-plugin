@@ -2,19 +2,25 @@ package org.jenkinsci.plugins.proxmox.buildsteps;
 
 import hudson.AbortException;
 import hudson.Extension;
+import hudson.FilePath;
 import hudson.Launcher;
 import hudson.model.AbstractBuild;
 import hudson.model.BuildListener;
+import hudson.model.Run;
+import hudson.model.TaskListener;
 import hudson.util.FormValidation;
 
 import javax.security.auth.login.LoginException;
+import java.io.IOException;
 
 import jenkins.model.Jenkins;
 import kong.unirest.json.JSONObject;
 import org.jenkinsci.plugins.proxmox.pve2api.Connector;
+import org.jenkinsci.Symbol;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.verb.POST;
+import edu.umd.cs.findbugs.annotations.NonNull;
 
 public class RunCommand extends ProxmoxBuildStep {
 
@@ -157,6 +163,7 @@ public class RunCommand extends ProxmoxBuildStep {
     }
 
     @Extension
+    @Symbol("proxmoxRunCommand")
     public static final class DescriptorImpl extends ProxmoxBuildStepDescriptor {
 
         @Override
