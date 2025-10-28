@@ -12,7 +12,6 @@ import java.util.List;
 
 import org.jenkinsci.plugins.proxmox.Datacenter;
 import org.jenkinsci.plugins.proxmox.pve2api.Connector;
-import org.jenkinsci.Symbol;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.QueryParameter;
 
@@ -106,7 +105,6 @@ public class RevertToSnapshot extends ProxmoxBuildStep {
     }
     
     @Extension
-    @Symbol("proxmoxRevertToSnapshot")
     public static final class DescriptorImpl extends ProxmoxBuildStepDescriptor {
         
         @Override
