@@ -84,7 +84,7 @@ public class CreateSnapshot extends ProxmoxBuildStep {
 
         @Override
         public String getDisplayName() {
-            return "Proxmox: Create Snapshot";
+            return "Create Snapshot";
         }
     }
 }

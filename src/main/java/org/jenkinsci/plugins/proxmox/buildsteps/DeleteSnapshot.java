@@ -78,7 +78,7 @@ public class DeleteSnapshot extends ProxmoxBuildStep {
 
         @Override
         public String getDisplayName() {
-            return "Proxmox: Delete Snapshot";
+            return "Delete Snapshot";
         }
 
         public ListBoxModel doFillSnapshotNameItems(@QueryParameter String datacenterDescription,

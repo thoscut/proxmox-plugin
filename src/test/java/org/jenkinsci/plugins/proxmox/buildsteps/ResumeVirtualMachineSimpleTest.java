@@ -41,6 +41,6 @@ class ResumeVirtualMachineSimpleTest {
 
         // Then
         assertThat("Display name should be correct",
-                   descriptor.getDisplayName(), is("Proxmox: Resume Virtual Machine"));
+                   descriptor.getDisplayName(), is("Resume Virtual Machine"));
     }
 }

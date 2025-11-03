@@ -57,7 +57,7 @@ class CloneVirtualMachineAdvancedSimpleTest {
 
         // Then
         assertThat("Display name should be correct",
-                   descriptor.getDisplayName(), is("Proxmox: Clone Virtual Machine (Advanced)"));
+                   descriptor.getDisplayName(), is("Clone Virtual Machine (Advanced)"));
     }
 
     @Test

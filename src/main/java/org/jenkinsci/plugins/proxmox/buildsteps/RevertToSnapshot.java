@@ -109,7 +109,7 @@ public class RevertToSnapshot extends ProxmoxBuildStep {
         
         @Override
         public String getDisplayName() {
-            return "Proxmox: Revert to Snapshot";
+            return "Revert to Snapshot";
         }
         
         public ListBoxModel doFillSnapshotNameItems(@QueryParameter String datacenterDescription,

@@ -140,16 +140,30 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
     }
 
     public VirtualMachineSlave provision(Datacenter datacenter, String plannedNodeName) throws Exception {
+        // Validate required configuration
+        if (templateVmId == null || templateVmId.trim().isEmpty()) {
+            String errorMessage = "Template VM ID is not configured for template '" + templateName +
+                                  "'. Please configure the template in Jenkins cloud settings.";
+            LOGGER.log(Level.SEVERE, errorMessage);
+            throw new IllegalStateException(errorMessage);
+        }
+        if (datacenterNode == null || datacenterNode.trim().isEmpty()) {
+            String errorMessage = "Datacenter node is not configured for template '" + templateName +
+                                  "'. Please configure the template in Jenkins cloud settings.";
+            LOGGER.log(Level.SEVERE, errorMessage);
+            throw new IllegalStateException(errorMessage);
+        }
+
         int currentCount = getCurrentSlaveCount();
         int instanceCap = getInstanceCap();
         if (currentCount >= instanceCap) {
-            LOGGER.log(Level.WARNING, "Instance cap reached for template {0}: {1}/{2} slaves running", 
+            LOGGER.log(Level.WARNING, "Instance cap reached for template {0}: {1}/{2} slaves running",
                       new Object[]{templateName, currentCount, instanceCap});
-            throw new IllegalStateException("Instance cap reached for template: " + templateName + 
+            throw new IllegalStateException("Instance cap reached for template: " + templateName +
                                           " (" + currentCount + "/" + instanceCap + " slaves running)");
         }
-        
-        LOGGER.log(Level.INFO, "Provisioning new slave for template {0}: {1}/{2} slaves currently running", 
+
+        LOGGER.log(Level.INFO, "Provisioning new slave for template {0}: {1}/{2} slaves currently running",
                   new Object[]{templateName, currentCount, instanceCap});
 
         if (currentlyProvisioning == null) {
@@ -305,6 +319,14 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
     }
 
     private Integer performClone(Connector proxmoxApi, String cloneName, String lockKey) throws LoginException {
+        // Validate templateVmId is not empty
+        if (templateVmId == null || templateVmId.trim().isEmpty()) {
+            String errorMessage = "Template VM ID is not configured for template '" + templateName +
+                                  "'. Please configure the template in Jenkins cloud settings.";
+            LOGGER.log(Level.SEVERE, errorMessage);
+            throw new IllegalStateException(errorMessage);
+        }
+
         Integer templateVmIdInt = Integer.parseInt(templateVmId);
         
         // Get template name for better logging
@@ -846,6 +868,25 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
             } catch (NumberFormatException e) {
                 return FormValidation.error("Max idle minutes must be a valid integer");
             }
+        }
+
+        public FormValidation doCheckTemplateVmId(@QueryParameter String value) {
+            if (value == null || value.trim().isEmpty()) {
+                return FormValidation.error("Template VM ID is required");
+            }
+            try {
+                Integer.parseInt(value);
+                return FormValidation.ok();
+            } catch (NumberFormatException e) {
+                return FormValidation.error("Template VM ID must be a valid integer");
+            }
+        }
+
+        public FormValidation doCheckDatacenterNode(@QueryParameter String value) {
+            if (value == null || value.trim().isEmpty()) {
+                return FormValidation.error("Datacenter node is required");
+            }
+            return FormValidation.ok();
         }
 
         @POST  

@@ -157,7 +157,7 @@ public class CloneVirtualMachineAdvanced extends ProxmoxBuildStep {
 
         @Override
         public String getDisplayName() {
-            return "Proxmox: Clone Virtual Machine (Advanced)";
+            return "Clone Virtual Machine (Advanced)";
         }
 
         public FormValidation doCheckTargetVmId(@QueryParameter String value) {

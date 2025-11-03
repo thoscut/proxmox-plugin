@@ -47,6 +47,6 @@ class CreateSnapshotSimpleTest {
 
         // Then
         assertThat("Display name should be correct",
-                   descriptor.getDisplayName(), is("Proxmox: Create Snapshot"));
+                   descriptor.getDisplayName(), is("Create Snapshot"));
     }
 }

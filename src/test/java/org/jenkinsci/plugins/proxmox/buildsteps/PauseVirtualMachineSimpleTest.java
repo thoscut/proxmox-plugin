@@ -41,6 +41,6 @@ class PauseVirtualMachineSimpleTest {
 
         // Then
         assertThat("Display name should be correct",
-                   descriptor.getDisplayName(), is("Proxmox: Pause Virtual Machine"));
+                   descriptor.getDisplayName(), is("Pause Virtual Machine"));
     }
 }

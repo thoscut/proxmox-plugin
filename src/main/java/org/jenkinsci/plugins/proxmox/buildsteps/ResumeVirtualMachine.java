@@ -78,7 +78,7 @@ public class ResumeVirtualMachine extends ProxmoxBuildStep {
 
         @Override
         public String getDisplayName() {
-            return "Proxmox: Resume Virtual Machine";
+            return "Resume Virtual Machine";
         }
     }
 }

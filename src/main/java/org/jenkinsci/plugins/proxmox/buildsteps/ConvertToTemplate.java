@@ -102,7 +102,7 @@ public class ConvertToTemplate extends ProxmoxBuildStep {
 
         @Override
         public String getDisplayName() {
-            return "Proxmox: Convert VM to Template";
+            return "Convert VM to Template";
         }
     }
 }

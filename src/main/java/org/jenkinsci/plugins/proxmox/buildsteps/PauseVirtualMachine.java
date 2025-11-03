@@ -89,7 +89,7 @@ public class PauseVirtualMachine extends ProxmoxBuildStep {
 
         @Override
         public String getDisplayName() {
-            return "Proxmox: Pause Virtual Machine";
+            return "Pause Virtual Machine";
         }
     }
 }

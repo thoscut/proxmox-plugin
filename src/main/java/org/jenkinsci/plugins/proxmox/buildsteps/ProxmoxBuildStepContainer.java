@@ -32,16 +32,10 @@ import java.io.PrintStream;
 public class ProxmoxBuildStepContainer extends Builder implements SimpleBuildStep {
 
     private final ProxmoxBuildStep buildStep;
-    private final String datacenterDescription;
 
     @DataBoundConstructor
-    public ProxmoxBuildStepContainer(final ProxmoxBuildStep buildStep, final String datacenterDescription) {
+    public ProxmoxBuildStepContainer(final ProxmoxBuildStep buildStep) {
         this.buildStep = buildStep;
-        this.datacenterDescription = datacenterDescription;
-    }
-
-    public String getDatacenterDescription() {
-        return datacenterDescription;
     }
 
     public ProxmoxBuildStep getBuildStep() {
@@ -70,7 +64,6 @@ public class ProxmoxBuildStepContainer extends Builder implements SimpleBuildSte
 
     private void startLogs(PrintStream logger) {
         logger.println("[Proxmox] Starting: " + buildStep.getDescriptor().getDisplayName());
-        logger.println("[Proxmox] Using datacenter: " + datacenterDescription);
     }
 
     @Extension
@@ -96,20 +89,6 @@ public class ProxmoxBuildStepContainer extends Builder implements SimpleBuildSte
         @Override
         public boolean isApplicable(Class<? extends AbstractProject> jobType) {
             return true;
-        }
-
-        public ListBoxModel doFillDatacenterDescriptionItems() {
-            ListBoxModel select = new ListBoxModel();
-            try {
-                for (Cloud cloud : Jenkins.get().clouds) {
-                    if (cloud instanceof Datacenter) {
-                        select.add(((Datacenter) cloud).getDatacenterDescription());
-                    }
-                }
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-            return select;
         }
     }
 }

@@ -41,6 +41,6 @@ class ConvertToTemplateSimpleTest {
 
         // Then
         assertThat("Display name should be correct",
-                   descriptor.getDisplayName(), is("Proxmox: Convert VM to Template"));
+                   descriptor.getDisplayName(), is("Convert VM to Template"));
     }
 }

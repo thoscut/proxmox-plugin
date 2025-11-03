@@ -41,6 +41,6 @@ class DeleteSnapshotSimpleTest {
 
         // Then
         assertThat("Display name should be correct",
-                   descriptor.getDisplayName(), is("Proxmox: Delete Snapshot"));
+                   descriptor.getDisplayName(), is("Delete Snapshot"));
     }
 }

@@ -118,7 +118,7 @@ public class CloneVirtualMachine extends ProxmoxBuildStep {
         
         @Override
         public String getDisplayName() {
-            return "Proxmox: Clone Virtual Machine";
+            return "Clone Virtual Machine";
         }
         
         public FormValidation doCheckTargetVmId(@QueryParameter String value) {

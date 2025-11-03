@@ -91,7 +91,7 @@ public class HibernateVirtualMachine extends ProxmoxBuildStep {
 
         @Override
         public String getDisplayName() {
-            return "Proxmox: Hibernate Virtual Machine";
+            return "Hibernate Virtual Machine";
         }
     }
 }

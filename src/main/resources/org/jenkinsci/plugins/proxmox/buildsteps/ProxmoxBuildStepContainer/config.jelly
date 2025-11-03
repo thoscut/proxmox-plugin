@@ -1,10 +1,6 @@
 <?jelly escape-by-default='true'?>
 <j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form">
 
-    <f:entry title="${%Datacenter}" field="datacenterDescription">
-        <f:select />
-    </f:entry>
-
     <f:entry>
         <f:dropdownDescriptorSelector title="${%Proxmox Action}" field="buildStep" descriptors="${descriptor.buildSteps}" />
     </f:entry>

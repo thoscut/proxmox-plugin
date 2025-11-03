@@ -41,6 +41,6 @@ class HibernateVirtualMachineSimpleTest {
 
         // Then
         assertThat("Display name should be correct",
-                   descriptor.getDisplayName(), is("Proxmox: Hibernate Virtual Machine"));
+                   descriptor.getDisplayName(), is("Hibernate Virtual Machine"));
     }
 }
