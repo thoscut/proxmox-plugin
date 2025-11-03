@@ -479,7 +479,7 @@ public class Connector {
             // Windows command - use proper Windows guest agent format
             if (command.toLowerCase().startsWith("powershell")) {
                 // PowerShell command - use full path and proper arguments
-                // Split all space-separated parts into individual array elements
+                // PowerShell does NOT use '--' separator (causes parse errors)
                 String psCommand;
                 if (command.toLowerCase().startsWith("powershell.exe")) {
                     psCommand = command.substring(14).trim(); // Remove "powershell.exe "
@@ -491,7 +491,6 @@ public class Connector {
                     String[] parts = psCommand.split("\\s+");
                     java.util.List<String> cmdList = new java.util.ArrayList<>();
                     cmdList.add("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe");
-                    cmdList.add("--");
                     for (String part : parts) {
                         cmdList.add(part);
                     }
@@ -501,6 +500,7 @@ public class Connector {
                 }
             } else if (command.toLowerCase().startsWith("cmd")) {
                 // cmd command - split all space-separated parts into individual array elements
+                // Use '--' separator after cmd.exe (standard position)
                 String cmdCommand;
                 if (command.toLowerCase().startsWith("cmd.exe")) {
                     cmdCommand = command.substring(7).trim(); // Remove "cmd.exe "

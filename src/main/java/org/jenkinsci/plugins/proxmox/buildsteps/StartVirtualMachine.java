@@ -42,15 +42,43 @@ public class StartVirtualMachine extends ProxmoxBuildStep {
             String taskId = proxmoxApi.startQemuMachine(datacenterNode, vmIdInt);
             logInfo(listener, "Started VM " + vmId + ", task ID: " + taskId);
             
-            // Wait for startup if specified
+            // Wait for startup if specified - check VM is running and agent is responding
             if (startupWaitSeconds > 0) {
-                logInfo(listener, "Waiting " + startupWaitSeconds + " seconds for VM startup");
-                Thread.sleep(startupWaitSeconds * 1000L);
+                logInfo(listener, "Waiting up to " + startupWaitSeconds + " seconds for VM startup and guest agent");
+                int checks = startupWaitSeconds / 2; // Check every 2 seconds
+                boolean vmReady = false;
+
+                for (int i = 0; i < checks; i++) {
+                    Thread.sleep(2000);
+
+                    // Check if VM is running
+                    if (proxmoxApi.isQemuMachineRunning(datacenterNode, vmIdInt)) {
+                        // VM is running, now check if guest agent responds
+                        try {
+                            if (proxmoxApi.isGuestAgentAvailable(datacenterNode, vmIdInt)) {
+                                int elapsed = (i + 1) * 2;
+                                logInfo(listener, "VM and guest agent ready after " + elapsed + " seconds");
+                                vmReady = true;
+                                break;
+                            }
+                        } catch (Exception e) {
+                            // Guest agent not ready yet, continue waiting
+                        }
+                    }
+                }
+
+                if (!vmReady) {
+                    logInfo(listener, "Reached timeout after " + startupWaitSeconds + " seconds");
+                }
             }
-            
+
             // Verify VM is running
             if (proxmoxApi.isQemuMachineRunning(datacenterNode, vmIdInt)) {
                 logInfo(listener, "VM " + vmId + " started successfully");
+
+                // Note: Guest agent ping may succeed before the agent is ready to execute commands.
+                // RunCommand has robust retry logic to handle this properly.
+
                 return true;
             } else {
                 logError(listener, "VM " + vmId + " failed to start", null);
@@ -75,7 +103,7 @@ public class StartVirtualMachine extends ProxmoxBuildStep {
         
         @Override
         public String getDisplayName() {
-            return "Proxmox: Start Virtual Machine";
+            return "Start Virtual Machine";
         }
     }
 }

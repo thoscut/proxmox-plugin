@@ -65,18 +65,48 @@ public class RunCommand extends ProxmoxBuildStep {
             Connector proxmoxApi = getProxmoxConnector();
             Integer vmIdInt = parseVmId();
 
-            // Check if guest agent is available
-            if (!proxmoxApi.isGuestAgentAvailable(datacenterNode, vmIdInt)) {
-                String errorMsg = "Guest agent is not available on VM " + vmId + ". Make sure the guest agent is installed and running.";
+            // Execute the command with retry logic for guest agent availability
+            // The guest agent may respond to ping but not be ready for command execution
+            String pid = null;
+            int maxExecRetries = 20; // Try up to 20 times (up to 2 minutes)
+            Exception lastException = null;
+            boolean loggedWaiting = false;
+
+            for (int i = 0; i < maxExecRetries; i++) {
+                try {
+                    pid = proxmoxApi.executeGuestCommand(datacenterNode, vmIdInt, command);
+                    break; // Success
+                } catch (Exception e) {
+                    lastException = e;
+                    String errorMsg = e.getMessage();
+                    // Retry on guest agent errors and timeout errors
+                    boolean shouldRetry = errorMsg != null &&
+                        (errorMsg.contains("guest agent is not running") ||
+                         errorMsg.contains("got timeout"));
+
+                    if (shouldRetry) {
+                        if (i < maxExecRetries - 1) {
+                            if (!loggedWaiting) {
+                                logInfo(listener, "Waiting for guest agent to be fully operational...");
+                                loggedWaiting = true;
+                            }
+                            Thread.sleep(6000); // Wait 6 seconds between retries
+                        }
+                    } else {
+                        // Different error, don't retry
+                        throw e;
+                    }
+                }
+            }
+
+            if (pid == null) {
+                String errorMsg = "Failed to execute command after " + maxExecRetries + " attempts: " + (lastException != null ? lastException.getMessage() : "Unknown error");
                 logInfo(listener, "[ERROR] " + errorMsg);
                 if (failOnError) {
                     throw new AbortException(errorMsg);
                 }
                 return false;
             }
-
-            // Execute the command
-            String pid = proxmoxApi.executeGuestCommand(datacenterNode, vmIdInt, command);
             logInfo(listener, "Command execution started with PID: " + pid);
 
             if (!waitForCompletion) {
@@ -95,12 +125,33 @@ public class RunCommand extends ProxmoxBuildStep {
             while (!completed && (System.currentTimeMillis() - startTime) < timeoutMs) {
                 Thread.sleep(2000); // Check every 2 seconds
 
-                status = proxmoxApi.getGuestCommandStatus(datacenterNode, vmIdInt, pid);
+                try {
+                    status = proxmoxApi.getGuestCommandStatus(datacenterNode, vmIdInt, pid);
 
-                if (status.has("exited") && status.getBoolean("exited")) {
-                    completed = true;
-                } else {
-                    logInfo(listener, "Command still running...");
+                    // Check if command has exited - the field can be integer (1/0), boolean, or string
+                    if (status.has("exited")) {
+                        Object exitedValue = status.get("exited");
+                        if (exitedValue instanceof Boolean) {
+                            completed = (Boolean) exitedValue;
+                        } else if (exitedValue instanceof Integer) {
+                            completed = ((Integer) exitedValue) == 1;
+                        } else if (exitedValue instanceof String) {
+                            completed = "1".equals(exitedValue) || "true".equalsIgnoreCase((String) exitedValue);
+                        }
+                    }
+
+                    if (!completed) {
+                        logInfo(listener, "Command still running...");
+                    }
+                } catch (Exception e) {
+                    // Guest agent may be temporarily unavailable (e.g., during reboot)
+                    String errorMsg = e.getMessage();
+                    if (errorMsg != null && errorMsg.contains("guest agent is not running")) {
+                        logInfo(listener, "Guest agent temporarily unavailable (VM may be rebooting), waiting...");
+                    } else {
+                        logInfo(listener, "Temporary error checking command status: " + errorMsg + ", retrying...");
+                    }
+                    // Continue loop - don't fail immediately on temporary errors
                 }
             }
 
