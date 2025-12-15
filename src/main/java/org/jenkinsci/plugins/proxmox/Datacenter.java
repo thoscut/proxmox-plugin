@@ -104,13 +104,9 @@ public class Datacenter extends Cloud {
         // Update statistics
         getStatistics().recordProvisioningAttempt();
 
-        // Clean up any orphaned nodes to free up capacity
-        try {
-            cleanupOrphanedNodes();
-        } catch (Exception e) {
-            LOGGER.log(Level.WARNING, "Failed to cleanup orphaned nodes during provisioning", e);
-        }
-        
+        // Note: Orphan cleanup is handled by ProxmoxCloudMonitor, not here
+        // Doing cleanup in provision() path would add latency to build starts
+
         // Find templates that can provision for this label
         for (ProxmoxCloudSlaveTemplate template : templates) {
             if (template.canProvision(label)) {
@@ -171,12 +167,8 @@ public class Datacenter extends Cloud {
             return false;
         }
 
-        // Clean up any orphaned nodes first to get accurate capacity count
-        try {
-            cleanupOrphanedNodes();
-        } catch (Exception e) {
-            LOGGER.log(Level.WARNING, "Failed to cleanup orphaned nodes during canProvision check", e);
-        }
+        // Note: Orphan cleanup is handled by ProxmoxCloudMonitor, not here
+        // Running cleanup in canProvision() would add latency to scheduling decisions
 
         int currentSlaves = getCurrentSlaveCount();
         LOGGER.log(Level.FINE, "canProvision: Current slaves: {0}, Instance cap: {1}",
