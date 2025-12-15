@@ -1,0 +1,27 @@
+<div>
+    <p>
+        The command to execute on each newly cloned VM after it has been started.
+    </p>
+    <p>
+        <strong>Examples:</strong>
+    </p>
+    <ul>
+        <li><code>mkdir -p /opt/jenkins && chown jenkins:jenkins /opt/jenkins</code> - Setup Jenkins directories</li>
+        <li><code>systemctl enable docker && systemctl start docker</code> - Enable Docker service</li>
+        <li><code>curl -fsSL https://example.com/setup.sh | bash</code> - Run setup script from URL</li>
+        <li><code>apt-get update && apt-get install -y git curl</code> - Install packages</li>
+        <li><code>echo 'export JAVA_HOME=/usr/lib/jvm/java-11' >> /etc/environment</code> - Set environment variables</li>
+    </ul>
+    <p>
+        <strong>Multi-line commands:</strong> Use <code>&&</code> to chain commands or separate with semicolons.
+        For complex setup, consider creating a script file in your VM template and calling it here.
+    </p>
+    <p>
+        <strong>Command execution:</strong> Commands run with the privileges of the user running the guest agent
+        (typically root on Linux). Be careful with destructive operations.
+    </p>
+    <p>
+        <strong>Environment:</strong> The command runs in the context of the VM, not the Jenkins master.
+        Network access and installed software depend on your VM template configuration.
+    </p>
+</div>

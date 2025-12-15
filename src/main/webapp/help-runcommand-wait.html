@@ -1,0 +1,28 @@
+<div>
+    <p>
+        When enabled, Jenkins will wait for the command to complete before continuing to the next build step.
+    </p>
+    <p>
+        <strong>Enabled (default):</strong>
+    </p>
+    <ul>
+        <li>Jenkins waits for command completion</li>
+        <li>Command output (stdout/stderr) is displayed in build log</li>
+        <li>Build step fails if command returns non-zero exit code</li>
+        <li>Timeout setting applies</li>
+    </ul>
+    <p>
+        <strong>Disabled:</strong>
+    </p>
+    <ul>
+        <li>Jenkins immediately continues to next build step</li>
+        <li>Command runs in background on the VM</li>
+        <li>No output is captured</li>
+        <li>Build step is considered successful if command starts</li>
+        <li>Timeout setting is ignored</li>
+    </ul>
+    <p>
+        Use "fire-and-forget" mode (disabled) for long-running background tasks
+        or when you don't need to capture output.
+    </p>
+</div>

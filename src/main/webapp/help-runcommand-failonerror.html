@@ -1,0 +1,27 @@
+<div>
+    <p>
+        Controls whether the Jenkins build should fail when the command execution encounters an error.
+    </p>
+    <p>
+        <strong>Enabled (default):</strong>
+    </p>
+    <ul>
+        <li>Build fails if guest agent is not available</li>
+        <li>Build fails if command times out (when waiting for completion)</li>
+        <li>Build fails if command returns non-zero exit code</li>
+        <li>Build fails on any connection or API errors</li>
+    </ul>
+    <p>
+        <strong>Disabled:</strong>
+    </p>
+    <ul>
+        <li>Build continues even if command fails</li>
+        <li>Errors are logged but don't stop the build</li>
+        <li>Useful for optional or diagnostic commands</li>
+        <li>Build step is marked as unstable rather than failed</li>
+    </ul>
+    <p>
+        <strong>Note:</strong> This setting does not affect syntax errors or configuration
+        problems (empty commands, invalid VM IDs, etc.) which will always cause failure.
+    </p>
+</div>
