@@ -1,0 +1,34 @@
+<div>
+    <p>
+        Command to execute on the virtual machine to start the Jenkins agent.
+        The command will be executed using the QEMU Guest Agent.
+    </p>
+    <p>
+        <strong>Leave empty to use the default command</strong> which is automatically generated based on the
+        "Use WebSocket" and "Work Directory" settings.
+    </p>
+    <p>
+        <strong>Available variables:</strong>
+    </p>
+    <ul>
+        <li><code>{JENKINS_URL}</code> - Jenkins root URL</li>
+        <li><code>{COMPUTER_NAME}</code> - Agent/computer name</li>
+        <li><code>{SECRET}</code> - JNLP secret for this agent</li>
+        <li><code>{VM_ID}</code> - Proxmox VM ID</li>
+    </ul>
+    <p>
+        <strong>Default command format (modern):</strong><br>
+        <code>java -jar agent.jar -url {JENKINS_URL} -secret {SECRET} -name {COMPUTER_NAME} [-webSocket] [-workDir "path"]</code>
+    </p>
+    <p>
+        <strong>Legacy example for Windows:</strong><br>
+        <code>cd C:\jenkins && java -jar agent.jar -jnlpUrl {JENKINS_URL}/computer/{COMPUTER_NAME}/jenkins-agent.jnlp -secret {SECRET}</code>
+    </p>
+    <p>
+        <strong>Legacy example for Linux:</strong><br>
+        <code>cd /opt/jenkins && java -jar agent.jar -jnlpUrl {JENKINS_URL}/computer/{COMPUTER_NAME}/jenkins-agent.jnlp -secret {SECRET}</code>
+    </p>
+    <p>
+        <strong>Note:</strong> Make sure the Jenkins agent JAR file and Java are available on the target VM at the specified paths.
+    </p>
+</div>
