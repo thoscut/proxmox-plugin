@@ -2,23 +2,37 @@ package org.jenkinsci.plugins.proxmox;
 
 import hudson.Extension;
 import hudson.Util;
+import hudson.model.Computer;
 import hudson.model.Descriptor;
+import hudson.model.Executor;
 import hudson.model.Label;
+import hudson.model.Node;
+import hudson.model.Queue;
 import hudson.slaves.Cloud;
 import hudson.slaves.NodeProvisioner;
 import hudson.util.FormValidation;
 import hudson.util.Secret;
+import hudson.util.ListBoxModel;
+import com.cloudbees.plugins.credentials.CredentialsProvider;
+import com.cloudbees.plugins.credentials.common.StandardListBoxModel;
+import com.cloudbees.plugins.credentials.common.StandardUsernamePasswordCredentials;
+import com.cloudbees.plugins.credentials.domains.DomainRequirement;
+import hudson.security.ACL;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.Callable;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.security.auth.login.LoginException;
 import jenkins.model.Jenkins;
-import net.sf.json.JSONObject;
+import kong.unirest.json.JSONObject;
 import org.jenkinsci.plugins.proxmox.pve2api.Connector;
+import org.jenkinsci.plugins.cloudstats.ProvisioningActivity;
+import org.jenkinsci.Symbol;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.StaplerRequest2;
@@ -32,53 +46,387 @@ public class Datacenter extends Cloud {
     private static final Logger LOGGER = Logger.getLogger(Datacenter.class.getName());
 
     private final String hostname;
-    private final String username;
+    private final String credentialsId;
     private final String realm;
-    private final Secret password;
     private final Boolean ignoreSSL;
+    private final List<ProxmoxCloudSlaveTemplate> templates;
+    private final int instanceCap;
     private transient Connector pveConnector;
+    private transient ProxmoxCloudStatistics statistics;
 
     @DataBoundConstructor
-    public Datacenter(String hostname, String username, String realm, Secret password, Boolean ignoreSSL) {
-        super("Datacenter(proxmox)");
+    public Datacenter(String hostname, String credentialsId, String realm, Boolean ignoreSSL,
+                     List<ProxmoxCloudSlaveTemplate> templates, Integer instanceCap) {
+        super(hostname != null && !hostname.isEmpty() ? "Proxmox-" + hostname : "Proxmox-Datacenter");
         this.hostname = hostname;
-        this.username = username;
+        this.credentialsId = credentialsId;
         this.realm = realm;
-        this.password = password;
         this.ignoreSSL = ignoreSSL;
+        this.templates = templates != null ? templates : new ArrayList<>();
+        this.instanceCap = instanceCap != null ? instanceCap : 0;
         this.pveConnector = null;
+        this.statistics = null;
+    }
+
+    // Legacy constructor for backward compatibility - will be deprecated
+    @Deprecated
+    public Datacenter(String hostname, String username, String realm, Secret password, Boolean ignoreSSL) {
+        this(hostname, null, realm, ignoreSSL, null, 0);
+        // For legacy instances, we'll need to handle credentials differently
+        // This will be handled by the credential resolution method
+    }
+
+    @Override
+    public Collection<NodeProvisioner.PlannedNode> provision(hudson.slaves.Cloud.CloudState state, int excessWorkload) {
+        return provision(state.getLabel(), excessWorkload);
     }
 
     public Collection<NodeProvisioner.PlannedNode> provision(Label label, int excessWorkload) {
-        return Collections.emptySet();
+        LOGGER.log(Level.INFO, "Provision called for datacenter {0} with label {1} and excessWorkload {2}",
+                  new Object[]{getDatacenterDescription(), label, excessWorkload});
+
+        List<NodeProvisioner.PlannedNode> plannedNodes = new ArrayList<>();
+
+        // Check if credentials are configured
+        if (credentialsId == null || credentialsId.trim().isEmpty()) {
+            LOGGER.log(Level.SEVERE, "Provision: No credentials configured for datacenter {0}. Please configure credentials in cloud settings.",
+                      getDatacenterDescription());
+            getStatistics().recordProvisioningFailure("No credentials configured");
+            return plannedNodes;
+        }
+
+        if (templates == null || templates.isEmpty()) {
+            LOGGER.log(Level.FINE, "Provision: No templates configured for datacenter {0}",
+                      getDatacenterDescription());
+            return plannedNodes;
+        }
+
+        // Update statistics
+        getStatistics().recordProvisioningAttempt();
+
+        // Clean up any orphaned nodes to free up capacity
+        try {
+            cleanupOrphanedNodes();
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "Failed to cleanup orphaned nodes during provisioning", e);
+        }
+        
+        // Find templates that can provision for this label
+        for (ProxmoxCloudSlaveTemplate template : templates) {
+            if (template.canProvision(label)) {
+                int currentSlaves = getCurrentSlaveCount();
+                int availableCapacity = Math.max(0, instanceCap - currentSlaves);
+                int toProvision = Math.min(excessWorkload, availableCapacity);
+                
+                if (toProvision > 0) {
+                    for (int i = 0; i < toProvision; i++) {
+                        String plannedNodeName = template.getTemplateName() + "-" + System.currentTimeMillis();
+
+                        // Create a unique provisioning ID for cloud-stats tracking
+                        ProvisioningActivity.Id provisioningId = new ProvisioningActivity.Id(
+                            getDatacenterDescription(),
+                            template.getTemplateName(),
+                            plannedNodeName
+                        );
+
+                        // Use ProxmoxPlannedNode for cloud-stats integration
+                        ProxmoxPlannedNode plannedNode = new ProxmoxPlannedNode(
+                            provisioningId,
+                            getDatacenterDescription(),
+                            template.getTemplateName(),
+                            Computer.threadPoolForRemoting.submit(new ProvisioningCallback(template, plannedNodeName, provisioningId)),
+                            Integer.parseInt(template.getNumExecutors())
+                        );
+
+                        plannedNodes.add(plannedNode);
+                    }
+                    excessWorkload -= toProvision;
+                    if (excessWorkload <= 0) break;
+                }
+            }
+        }
+        
+        return plannedNodes;
+    }
+
+    @Override
+    public boolean canProvision(hudson.slaves.Cloud.CloudState state) {
+        return canProvision(state.getLabel());
     }
 
     public boolean canProvision(Label label) {
+        LOGGER.log(Level.FINE, "canProvision called for datacenter {0} with label {1}",
+                  new Object[]{getDatacenterDescription(), label});
+
+        // Check if credentials are configured
+        if (credentialsId == null || credentialsId.trim().isEmpty()) {
+            LOGGER.log(Level.FINE, "canProvision: No credentials configured for datacenter {0}",
+                      getDatacenterDescription());
+            return false;
+        }
+
+        if (templates == null || templates.isEmpty()) {
+            LOGGER.log(Level.FINE, "canProvision: No templates configured for datacenter {0}",
+                      getDatacenterDescription());
+            return false;
+        }
+
+        // Clean up any orphaned nodes first to get accurate capacity count
+        try {
+            cleanupOrphanedNodes();
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "Failed to cleanup orphaned nodes during canProvision check", e);
+        }
+
+        int currentSlaves = getCurrentSlaveCount();
+        LOGGER.log(Level.FINE, "canProvision: Current slaves: {0}, Instance cap: {1}",
+                  new Object[]{currentSlaves, instanceCap});
+
+        for (ProxmoxCloudSlaveTemplate template : templates) {
+            boolean templateCanProvision = template.canProvision(label);
+            LOGGER.log(Level.FINE, "canProvision: Template {0} can provision for label {1}: {2}",
+                      new Object[]{template.getTemplateName(), label, templateCanProvision});
+
+            if (templateCanProvision) {
+                boolean hasCapacity = currentSlaves < instanceCap;
+                LOGGER.log(Level.FINE, "canProvision: Capacity check - current: {0} < cap: {1} = {2}",
+                          new Object[]{currentSlaves, instanceCap, hasCapacity});
+                return hasCapacity;
+            }
+        }
+
+        LOGGER.log(Level.FINE, "canProvision: No templates can provision for label {0}", label);
         return false;
+    }
+
+    private class ProvisioningCallback implements Callable<Node> {
+        private final ProxmoxCloudSlaveTemplate template;
+        private final String plannedNodeName;
+        private final long startTime;
+        private final ProvisioningActivity.Id provisioningId;
+
+        ProvisioningCallback(ProxmoxCloudSlaveTemplate template, String plannedNodeName, ProvisioningActivity.Id provisioningId) {
+            this.template = template;
+            this.plannedNodeName = plannedNodeName;
+            this.startTime = System.currentTimeMillis();
+            this.provisioningId = provisioningId;
+        }
+
+        public Node call() throws Exception {
+            try {
+                // Create and provision the node
+                Node result = template.provision(Datacenter.this, plannedNodeName);
+
+                // Set the provisioning ID on the node for cloud-stats tracking
+                // template.provision() always returns VirtualMachineSlave, but check defensively
+                if (result != null) {
+                    ((VirtualMachineSlave) result).setProvisioningId(provisioningId);
+                }
+
+                // Calculate provisioning duration
+                long duration = System.currentTimeMillis() - startTime;
+                LOGGER.log(Level.INFO, "Node {0} provisioned in {1}ms. Jenkins will add node and begin launch phase.",
+                          new Object[]{plannedNodeName, duration});
+
+                // Record in our internal statistics (cloud-stats also tracks this separately)
+                if (result != null) {
+                    getStatistics().recordProvisioningSuccess(duration);
+                }
+
+                // Return the node - Jenkins core will add it and trigger the launch phase
+                // The provisioning phase ends when this method returns
+                return result;
+            } catch (Exception e) {
+                getStatistics().recordProvisioningFailure(e.getMessage());
+                throw e;
+            }
+        }
+    }
+
+    private int getCurrentSlaveCount() {
+        int count = 0;
+        for (hudson.model.Node node : Jenkins.get().getNodes()) {
+            if (node instanceof VirtualMachineSlave) {
+                VirtualMachineSlave vmSlave = (VirtualMachineSlave) node;
+                if (getDatacenterDescription().equals(vmSlave.getDatacenterDescription())) {
+                    count++;
+                }
+            }
+        }
+        return count;
     }
 
     public String getHostname() {
         return hostname;
     }
 
-    public String getUsername() {
-        return username;
+    public String getCredentialsId() {
+        return credentialsId;
     }
 
     public String getRealm() {
         return realm;
     }
 
+    /**
+     * Resolve credentials from Jenkins credential store.
+     * @return StandardUsernamePasswordCredentials or null if not found
+     */
+    private StandardUsernamePasswordCredentials getCredentials() {
+        if (credentialsId == null || credentialsId.isEmpty()) {
+            return null;
+        }
+
+        List<StandardUsernamePasswordCredentials> credentials = CredentialsProvider.lookupCredentialsInItemGroup(
+            StandardUsernamePasswordCredentials.class,
+            Jenkins.get(),
+            ACL.SYSTEM2,
+            Collections.<DomainRequirement>emptyList()
+        );
+
+        for (StandardUsernamePasswordCredentials cred : credentials) {
+            if (credentialsId.equals(cred.getId())) {
+                return cred;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Get username from Jenkins credentials.
+     * @return username or null if credentials not found
+     */
+    public String getUsername() {
+        StandardUsernamePasswordCredentials creds = getCredentials();
+        return creds != null ? creds.getUsername() : null;
+    }
+
+    /**
+     * Get password from Jenkins credentials.
+     * @return password secret or null if credentials not found
+     */
     public Secret getPassword() {
-        return password;
+        StandardUsernamePasswordCredentials creds = getCredentials();
+        return creds != null ? creds.getPassword() : null;
     }
 
     public Boolean getIgnoreSSL() {
         return ignoreSSL;
     }
 
+    public List<ProxmoxCloudSlaveTemplate> getTemplates() {
+        return templates != null ? templates : new ArrayList<>();
+    }
+
+    public int getInstanceCap() {
+        return instanceCap;
+    }
+
     public String getDatacenterDescription() {
-        return username + "@" + realm + " - " + hostname;
+        String username = getUsername();
+        if (username != null) {
+            return username + "@" + realm + " - " + hostname;
+        } else if (credentialsId != null && !credentialsId.trim().isEmpty()) {
+            return "[" + credentialsId + "]@" + realm + " - " + hostname;
+        } else {
+            return "[no-credentials]@" + realm + " - " + hostname;
+        }
+    }
+    
+    public ProxmoxCloudStatistics getStatistics() {
+        if (statistics == null) {
+            statistics = ProxmoxCloudStatistics.getInstance(this);
+        }
+        return statistics;
+    }
+    
+    public void updateStatistics() {
+        getStatistics().updateCurrentStatus();
+    }
+    
+    public String getHealthSummary() {
+        return getStatistics().getHealthSummary();
+    }
+    
+    public String getDetailedStatisticsReport() {
+        return getStatistics().getDetailedReport();
+    }
+    
+    @Override
+    public String toString() {
+        return getDatacenterDescription();
+    }
+    
+    public String getStatusSummary() {
+        updateStatistics();
+        ProxmoxCloudStatistics stats = getStatistics();
+        
+        StringBuilder summary = new StringBuilder();
+        summary.append("<div style='font-family: monospace; font-size: 12px;'>");
+        summary.append("<strong>").append(getDatacenterDescription()).append("</strong><br>");
+        
+        // Connection Status
+        if (stats.isDatacenterReachable()) {
+            summary.append("🟢 <span style='color: green;'>Connected</span>");
+        } else {
+            summary.append("🔴 <span style='color: red;'>Disconnected - ").append(stats.getLastErrorMessage()).append("</span>");
+        }
+        
+        summary.append("<br><br>");
+        
+        // Capacity Information
+        summary.append("<strong>Capacity:</strong> ")
+               .append(stats.getCurrentSlaveCount()).append("/").append(instanceCap)
+               .append(" slaves (").append(Math.max(0, instanceCap - stats.getCurrentSlaveCount())).append(" available)<br>");
+        
+        // Slave Status
+        summary.append("<strong>Slaves:</strong> ")
+               .append(stats.getOnlineSlaves()).append(" online, ")
+               .append(stats.getOfflineSlaves()).append(" offline, ")
+               .append(stats.getTemporarilyOfflineSlaves()).append(" temp-offline");
+        
+        if (stats.getProvisioningSlaves() > 0) {
+            summary.append(", ").append(stats.getProvisioningSlaves()).append(" provisioning");
+        }
+        summary.append("<br>");
+        
+        // Provisioning Statistics
+        if (stats.getTotalProvisioningAttempts() > 0) {
+            summary.append("<strong>Provisioning:</strong> ")
+                   .append(String.format("%.1f%% success rate ", stats.getSuccessRate()))
+                   .append("(").append(stats.getSuccessfulProvisionings()).append("/")
+                   .append(stats.getTotalProvisioningAttempts()).append(" attempts)<br>");
+        }
+        
+        // Node Health Summary
+        Map<String, ProxmoxCloudStatistics.NodeHealth> nodeHealth = stats.getNodeHealthMap();
+        if (!nodeHealth.isEmpty()) {
+            summary.append("<strong>Nodes:</strong> ");
+            int onlineNodes = 0;
+            int totalNodes = nodeHealth.size();
+            
+            for (ProxmoxCloudStatistics.NodeHealth health : nodeHealth.values()) {
+                if (health.online) onlineNodes++;
+            }
+            
+            summary.append(onlineNodes).append("/").append(totalNodes).append(" online");
+            
+            // Show individual node status
+            summary.append("<br>");
+            for (ProxmoxCloudStatistics.NodeHealth health : nodeHealth.values()) {
+                summary.append("&nbsp;&nbsp;• ").append(health.nodeName).append(": ");
+                if (health.online) {
+                    summary.append(String.format("🟢 Online (CPU: %.0f%%, RAM: %.0f%%, VMs: %d)", 
+                                  health.cpuUsage, health.memoryUsage, health.runningVMs));
+                } else {
+                    summary.append("🔴 ").append(health.status);
+                }
+                summary.append("<br>");
+            }
+        }
+        
+        summary.append("</div>");
+        return summary.toString();
     }
 
     @Override
@@ -88,6 +436,17 @@ public class Datacenter extends Cloud {
 
     public Connector proxmoxInstance() {
         if (pveConnector == null) {
+            if (credentialsId == null || credentialsId.trim().isEmpty()) {
+                throw new IllegalStateException("No credentials configured for Proxmox datacenter '" + hostname + "'. Please configure credentials in the cloud settings.");
+            }
+
+            String username = getUsername();
+            Secret password = getPassword();
+
+            if (username == null || password == null) {
+                throw new IllegalStateException("Unable to resolve credentials with ID '" + credentialsId + "' for datacenter '" + hostname + "'. Please verify the credentials exist and are accessible.");
+            }
+
             pveConnector = new Connector(hostname, username, realm, password, ignoreSSL);
         }
         return pveConnector;
@@ -128,14 +487,472 @@ public class Datacenter extends Cloud {
         }
     }
 
+    public boolean canTerminate(Computer computer) {
+        // Check if this computer is managed by this cloud instance
+        if (!(computer instanceof VirtualMachineSlaveComputer)) {
+            return false;
+        }
+
+        VirtualMachineSlaveComputer vmComputer = (VirtualMachineSlaveComputer) computer;
+        Node node = vmComputer.getNode();
+
+        if (!(node instanceof VirtualMachineSlave)) {
+            return false;
+        }
+
+        VirtualMachineSlave vmSlave = (VirtualMachineSlave) node;
+
+        // Check if this slave belongs to this datacenter
+        if (!getDatacenterDescription().equals(vmSlave.getDatacenterDescription())) {
+            return false;
+        }
+
+        LOGGER.log(Level.FINE, "Can terminate VM slave: {0} (VM ID: {1})",
+                  new Object[]{vmSlave.getNodeName(), vmSlave.getVirtualMachineId().toString()});
+        return true;
+    }
+
+    public void terminate(Computer computer) {
+        if (!canTerminate(computer)) {
+            LOGGER.log(Level.WARNING, "Cannot terminate computer: {0} - not managed by this cloud instance",
+                      computer.getName());
+            return;
+        }
+
+        VirtualMachineSlaveComputer vmComputer = (VirtualMachineSlaveComputer) computer;
+        VirtualMachineSlave vmSlave = (VirtualMachineSlave) vmComputer.getNode();
+
+        if (vmSlave == null) {
+            LOGGER.log(Level.WARNING, "Cannot terminate: vmSlave node is null");
+            return;
+        }
+
+        LOGGER.log(Level.INFO, "Terminating VM slave: {0} (VM ID: {1}) on node: {2}",
+                  new Object[]{vmSlave.getNodeName(), vmSlave.getVirtualMachineId().toString(), vmSlave.getDatacenterNode()});
+
+        try {
+            // Update statistics
+            getStatistics().recordTermination();
+
+            Connector proxmoxApi = proxmoxInstance();
+            Integer vmId = vmSlave.getVirtualMachineId();
+            String nodeName = vmSlave.getDatacenterNode();
+
+            // Stop the VM if it's running
+            boolean wasRunning = proxmoxApi.isQemuMachineRunning(nodeName, vmId);
+            if (wasRunning) {
+                LOGGER.log(Level.INFO, "Stopping VM {0} (ID: {1}) before deletion",
+                          new Object[]{vmSlave.getNodeName(), vmId.toString()});
+                String stopTask = proxmoxApi.stopQemuMachine(nodeName, vmId);
+
+                // Wait for stop task to complete and check result
+                try {
+                    JSONObject stopTaskResult = proxmoxApi.waitForTaskToFinish(nodeName, stopTask);
+                    String stopStatus = stopTaskResult.getString("status");
+                    String stopExitStatus = stopTaskResult.has("exitstatus") && stopTaskResult.get("exitstatus") != null ?
+                                          stopTaskResult.getString("exitstatus") : null;
+
+                    // Proxmox tasks can have status "stopped" with exitstatus "OK" for success
+                    // or status "OK" for immediate success
+                    boolean isSuccess = "OK".equals(stopStatus) ||
+                                       ("stopped".equals(stopStatus) && "OK".equals(stopExitStatus));
+
+                    if (isSuccess) {
+                        LOGGER.log(Level.INFO, "VM {0} (ID: {1}) stopped successfully - status: {2}, exitstatus: {3}",
+                                  new Object[]{vmSlave.getNodeName(), vmId.toString(), stopStatus, stopExitStatus});
+                    } else {
+                        String errorMsg = "VM stop task failed with status: " + stopStatus;
+                        if (stopExitStatus != null) {
+                            errorMsg += ", exit status: " + stopExitStatus;
+                        }
+                        LOGGER.log(Level.WARNING, "VM stop failed for {0}: {1}",
+                                  new Object[]{vmSlave.getNodeName(), errorMsg});
+                        // Continue with deletion even if stop failed
+                    }
+                } catch (Exception e) {
+                    LOGGER.log(Level.WARNING, "VM stop task failed for " + vmSlave.getNodeName() +
+                              ", but continuing with deletion: " + e.getMessage(), e);
+                }
+            }
+
+            // Delete the VM
+            LOGGER.log(Level.INFO, "Deleting VM {0} (ID: {1})",
+                      new Object[]{vmSlave.getNodeName(), vmId.toString()});
+
+            // Delete the VM using the Proxmox API
+            proxmoxApi.deleteQemuMachine(nodeName, vmId);
+
+            // Remove the node from Jenkins
+            Jenkins jenkins = Jenkins.get();
+            jenkins.removeNode(vmSlave);
+
+            LOGGER.log(Level.INFO, "Successfully terminated and cleaned up VM slave: {0} (ID: {1})",
+                      new Object[]{vmSlave.getNodeName(), vmId.toString()});
+
+        } catch (LoginException | java.io.IOException e) {
+            LOGGER.log(Level.SEVERE, "Failed to terminate VM slave: " + vmSlave.getNodeName() +
+                      " (ID: " + vmSlave.getVirtualMachineId().toString() + ")", e);
+
+            // Even if VM deletion fails, try to remove from Jenkins to prevent orphaned nodes
+            try {
+                Jenkins.get().removeNode(vmSlave);
+                LOGGER.log(Level.INFO, "Removed orphaned Jenkins node: {0} after VM deletion failure",
+                          vmSlave.getNodeName());
+            } catch (Exception removeException) {
+                LOGGER.log(Level.SEVERE, "Failed to remove Jenkins node after VM deletion failure", removeException);
+            }
+        }
+    }
+
+    /**
+     * Clean up orphaned or stale Proxmox nodes that no longer correspond to actual VMs.
+     * This method checks all VirtualMachineSlave nodes belonging to this datacenter
+     * and removes any that cannot be reached or are no longer valid.
+     */
+    public void cleanupOrphanedNodes() {
+        LOGGER.log(Level.FINE, "Starting cleanup of orphaned nodes for datacenter: {0}", getDatacenterDescription());
+
+        List<VirtualMachineSlave> nodesToRemove = new ArrayList<>();
+
+        // Find all VirtualMachineSlave nodes belonging to this datacenter
+        for (Node node : Jenkins.get().getNodes()) {
+            if (node instanceof VirtualMachineSlave) {
+                VirtualMachineSlave vmSlave = (VirtualMachineSlave) node;
+                if (getDatacenterDescription().equals(vmSlave.getDatacenterDescription())) {
+
+                    Computer computer = vmSlave.toComputer();
+                    if (computer != null) {
+                        // Check if node is permanently offline or unreachable
+                        if (shouldCleanupNode(vmSlave, computer)) {
+                            nodesToRemove.add(vmSlave);
+                        }
+                    } else {
+                        // Computer is null, definitely orphaned
+                        LOGGER.log(Level.WARNING, "Found orphaned node with null computer: {0}", vmSlave.getNodeName());
+                        nodesToRemove.add(vmSlave);
+                    }
+                }
+            }
+        }
+
+        // Remove identified orphaned nodes
+        for (VirtualMachineSlave nodeToRemove : nodesToRemove) {
+            try {
+                LOGGER.log(Level.INFO, "Removing orphaned node: {0} (VM ID: {1})",
+                          new Object[]{nodeToRemove.getNodeName(), nodeToRemove.getVirtualMachineId().toString()});
+
+                Computer computer = nodeToRemove.toComputer();
+                if (computer != null) {
+                    computer.disconnect(new ProxmoxOfflineCause("Node cleanup - VM no longer accessible"));
+                }
+
+                Jenkins.get().removeNode(nodeToRemove);
+                getStatistics().recordTermination();
+
+            } catch (Exception e) {
+                LOGGER.log(Level.WARNING, "Failed to remove orphaned node: " + nodeToRemove.getNodeName(), e);
+            }
+        }
+
+        if (nodesToRemove.isEmpty()) {
+            LOGGER.log(Level.FINE, "No orphaned nodes found for datacenter: {0}", getDatacenterDescription());
+        } else {
+            LOGGER.log(Level.INFO, "Cleaned up {0} orphaned nodes for datacenter: {1}",
+                      new Object[]{nodesToRemove.size(), getDatacenterDescription()});
+        }
+
+        // Also cleanup orphaned VMs in Proxmox (VMs that lost their Jenkins nodes)
+        cleanupOrphanedVMs();
+    }
+
+    /**
+     * Clean up orphaned VMs in Proxmox that no longer have corresponding Jenkins nodes.
+     * This handles the case where Jenkins node was removed but VM deletion in Proxmox failed
+     * (e.g., during Jenkins restart).
+     */
+    private void cleanupOrphanedVMs() {
+        LOGGER.log(Level.FINE, "Starting cleanup of orphaned VMs in Proxmox for datacenter: {0}",
+                   getDatacenterDescription());
+
+        try {
+            Connector proxmoxApi = proxmoxInstance();
+
+            // Get all existing Jenkins nodes for this datacenter
+            Map<Integer, VirtualMachineSlave> jenkinsVMs = new HashMap<>();
+            for (Node node : Jenkins.get().getNodes()) {
+                if (node instanceof VirtualMachineSlave) {
+                    VirtualMachineSlave vmSlave = (VirtualMachineSlave) node;
+                    if (getDatacenterDescription().equals(vmSlave.getDatacenterDescription())) {
+                        jenkinsVMs.put(vmSlave.getVirtualMachineId(), vmSlave);
+                    }
+                }
+            }
+
+            // Check each template's VMs in Proxmox
+            if (templates != null) {
+                for (ProxmoxCloudSlaveTemplate template : templates) {
+                    try {
+                        cleanupOrphanedVMsForTemplate(proxmoxApi, template, jenkinsVMs);
+                    } catch (Exception e) {
+                        LOGGER.log(Level.WARNING, "Failed to cleanup orphaned VMs for template: " +
+                                  template.getTemplateName(), e);
+                    }
+                }
+            }
+
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "Failed to cleanup orphaned VMs in Proxmox", e);
+        }
+    }
+
+    /**
+     * Get Jenkins instance identifier matching the one used in VM names.
+     */
+    private static String getJenkinsInstanceId() {
+        try {
+            String rootUrl = Jenkins.get().getRootUrl();
+            if (rootUrl != null && !rootUrl.isEmpty()) {
+                int hash = rootUrl.hashCode();
+                return String.format("%08x", hash & 0xFFFFFFFFL);
+            }
+            String version = Jenkins.VERSION;
+            long startTime = Jenkins.get().getInitLevel().ordinal();
+            int hash = (version + startTime).hashCode();
+            return String.format("%08x", hash & 0xFFFFFFFFL);
+        } catch (Exception e) {
+            LOGGER.log(Level.FINE, "Could not get Jenkins instance identifier, using default", e);
+            return "00000000";
+        }
+    }
+
+    /**
+     * Check if a VM name belongs to this Jenkins instance.
+     * VM names follow pattern: templateName-instanceId-timestamp
+     */
+    private boolean belongsToThisInstance(String vmName, String templateName) {
+        if (!vmName.startsWith(templateName)) {
+            return false;
+        }
+
+        String instanceId = getJenkinsInstanceId();
+        // Check if VM name contains this instance's ID
+        // Pattern: templateName-instanceId-timestamp
+        String expectedPrefix = templateName + "-" + instanceId + "-";
+        boolean matches = vmName.startsWith(expectedPrefix);
+
+        if (!matches) {
+            LOGGER.log(Level.FINEST, "VM {0} does not belong to this instance (expected prefix: {1})",
+                      new Object[]{vmName, expectedPrefix});
+        }
+
+        return matches;
+    }
+
+    /**
+     * Cleanup orphaned VMs for a specific template.
+     */
+    private void cleanupOrphanedVMsForTemplate(Connector proxmoxApi,
+                                                ProxmoxCloudSlaveTemplate template,
+                                                Map<Integer, VirtualMachineSlave> jenkinsVMs)
+            throws Exception {
+
+        // Get the datacenter node from the template
+        String nodeName = template.getDatacenterNode();
+        if (nodeName == null || nodeName.isEmpty()) {
+            LOGGER.log(Level.FINE, "Template {0} has no datacenter node configured",
+                      template.getTemplateName());
+            return;
+        }
+
+        try {
+            // Get all VMs on this node
+            HashMap<String, Integer> vms = proxmoxApi.getQemuMachines(nodeName);
+
+            for (Map.Entry<String, Integer> entry : vms.entrySet()) {
+                String vmName = entry.getKey();
+                int vmId = entry.getValue();
+
+                // Never delete the template VM itself
+                if (template.getTemplateVmId() != null &&
+                    String.valueOf(vmId).equals(template.getTemplateVmId())) {
+                    LOGGER.log(Level.FINEST, "Skipping template VM {0} (ID: {1})",
+                              new Object[]{vmName, vmId});
+                    continue;
+                }
+
+                // Check if this VM belongs to this Jenkins instance
+                if (!belongsToThisInstance(vmName, template.getTemplateName())) {
+                    LOGGER.log(Level.FINEST, "Skipping VM {0} (ID: {1}) - belongs to different Jenkins instance",
+                              new Object[]{vmName, vmId});
+                    continue;
+                }
+
+                // Check if Jenkins has a node for this VM
+                if (jenkinsVMs.containsKey(vmId)) {
+                    // VM has a Jenkins node, check if it has resumable builds
+                    VirtualMachineSlave vmSlave = jenkinsVMs.get(vmId);
+                    Computer computer = vmSlave.toComputer();
+                    if (computer != null && hasPotentiallyResumableBuilds(computer)) {
+                        LOGGER.log(Level.FINE, "Preserving VM {0} (ID: {1}) - has resumable builds",
+                                  new Object[]{vmName, vmId});
+                        continue;
+                    }
+                    // VM has Jenkins node but no resumable builds - skip cleanup
+                    // (will be cleaned up when the Jenkins node is properly terminated)
+                    continue;
+                }
+
+                // VM doesn't have a Jenkins node (orphaned in Proxmox)
+                // Check if VM is running - don't delete running VMs unless forced
+                try {
+                    boolean isRunning = proxmoxApi.isQemuMachineRunning(nodeName, vmId);
+                    if (isRunning && !template.getForceCleanupRunningVMs()) {
+                        LOGGER.log(Level.WARNING, "Found orphaned VM {0} (ID: {1}) but it's running - not deleting (forceCleanupRunningVMs=false)",
+                                  new Object[]{vmName, vmId});
+                        continue;
+                    }
+                    if (isRunning && template.getForceCleanupRunningVMs()) {
+                        LOGGER.log(Level.INFO, "Found orphaned VM {0} (ID: {1}) that is running - will force delete (forceCleanupRunningVMs=true)",
+                                  new Object[]{vmName, vmId});
+                    }
+                } catch (Exception statusEx) {
+                    LOGGER.log(Level.FINE, "Could not get status for VM {0} (ID: {1}): {2}",
+                              new Object[]{vmName, vmId, statusEx.getMessage()});
+                }
+
+                // Safe to delete this orphaned VM
+                LOGGER.log(Level.INFO, "Deleting orphaned VM in Proxmox: {0} (ID: {1}) on node {2}",
+                          new Object[]{vmName, vmId, nodeName});
+
+                try {
+                    proxmoxApi.deleteQemuMachine(nodeName, vmId);
+                    LOGGER.log(Level.INFO, "Successfully deleted orphaned VM: {0} (ID: {1})",
+                              new Object[]{vmName, vmId});
+                    getStatistics().recordTermination();
+                } catch (Exception deleteEx) {
+                    LOGGER.log(Level.WARNING, "Failed to delete orphaned VM " + vmName +
+                              " (ID: " + vmId + "): " + deleteEx.getMessage(), deleteEx);
+                }
+            }
+
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "Failed to check VMs on node: " + nodeName, e);
+        }
+    }
+
+    /**
+     * Check if a computer has builds that might resume after Jenkins restart.
+     * This is critical for Pipeline resumability support.
+     */
+    private boolean hasPotentiallyResumableBuilds(Computer computer) {
+        if (computer == null) {
+            return false;
+        }
+
+        try {
+            // Check if any executors are busy
+            for (Executor executor : computer.getExecutors()) {
+                if (executor.isBusy()) {
+                    LOGGER.log(Level.FINE, "Computer {0} has busy executor", computer.getName());
+                    return true;
+                }
+            }
+
+            // Check for builds in the queue assigned to this node
+            Node node = computer.getNode();
+            if (node != null) {
+                for (Queue.BuildableItem item : Jenkins.get().getQueue().getBuildableItems()) {
+                    // Check if this node can take this build item
+                    if (node.canTake(item) == null) {
+                        LOGGER.log(Level.FINE, "Computer {0} can accept queued build", computer.getName());
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "Error checking for resumable builds on " + computer.getName(), e);
+            // When in doubt, assume there might be resumable builds
+            return true;
+        }
+    }
+
+    /**
+     * Determine if a node should be cleaned up based on its state and VM availability.
+     */
+    private boolean shouldCleanupNode(VirtualMachineSlave vmSlave, Computer computer) {
+        try {
+            // NEVER cleanup if builds might resume after Jenkins restart
+            if (hasPotentiallyResumableBuilds(computer)) {
+                LOGGER.log(Level.FINE, "Preserving node with potential resumable builds: {0}", vmSlave.getNodeName());
+                return false;
+            }
+
+            // Check if computer is manually set to offline permanently
+            if (computer.isManualLaunchAllowed() && computer.isOffline() &&
+                computer.getOfflineCause() instanceof hudson.slaves.OfflineCause.UserCause) {
+                LOGGER.log(Level.FINE, "Skipping manually offline node: {0}", vmSlave.getNodeName());
+                return false;
+            }
+
+            // Check if the VM still exists in Proxmox
+            Connector proxmoxApi = proxmoxInstance();
+            String nodeName = vmSlave.getDatacenterNode();
+            Integer vmId = vmSlave.getVirtualMachineId();
+
+            if (nodeName == null || vmId == null) {
+                LOGGER.log(Level.WARNING, "Node {0} has invalid datacenter node or VM ID", vmSlave.getNodeName());
+                return true; // Cleanup invalid nodes
+            }
+
+            // Try to get VM status from Proxmox
+            try {
+                // Just check if we can query the VM status - if this succeeds, VM exists
+                proxmoxApi.getQemuMachineStatus(nodeName, vmId);
+                return false; // VM exists, don't cleanup
+
+            } catch (Exception e) {
+                // If we can't query the VM, it likely doesn't exist
+                LOGGER.log(Level.INFO, "VM {0} (ID: {1}) on node {2} appears to be missing from Proxmox: {3}",
+                          new Object[]{vmSlave.getNodeName(), vmId.toString(), nodeName, e.getMessage()});
+                return true; // VM doesn't exist, cleanup the node
+            }
+
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "Error checking node " + vmSlave.getNodeName() + " for cleanup: " + e.getMessage(), e);
+            return false; // When in doubt, don't cleanup
+        }
+    }
+
+
+    /**
+     * Simple offline cause for cleanup operations.
+     */
+    private static class ProxmoxOfflineCause extends hudson.slaves.OfflineCause {
+        private final String reason;
+
+        ProxmoxOfflineCause(String reason) {
+            this.reason = reason;
+        }
+
+        @Override
+        public String toString() {
+            return reason;
+        }
+    }
+
     @Extension
+    @Symbol("datacenter")
     public static final class DescriptorImpl extends Descriptor<Cloud> {
+        @Override
         public String getDisplayName() {
             return "Proxmox Datacenter";
         }
 
         @Override
-        public boolean configure(StaplerRequest2 req, JSONObject o) throws FormException {
+        public boolean configure(StaplerRequest2 req, net.sf.json.JSONObject o) throws FormException {
             save();
             return super.configure(req, o);
         }
@@ -153,33 +970,74 @@ public class Datacenter extends Cloud {
             return emptyStringValidation("Hostname", value);
         }
 
-        public FormValidation doCheckUsername(@QueryParameter String value) {
-            return emptyStringValidation("Username", value);
+        public FormValidation doCheckCredentialsId(@QueryParameter String value) {
+            if (Util.fixEmptyAndTrim(value) == null) {
+                return FormValidation.warning("No credentials selected. Please select credentials to authenticate with Proxmox.");
+            }
+            return FormValidation.ok();
         }
 
         public FormValidation doCheckRealm(@QueryParameter String value) {
             return emptyStringValidation("Realm", value);
         }
 
-        public FormValidation doCheckPassword(@QueryParameter Secret value) {
-            return emptyStringValidation("Password", value.getPlainText());
+        /**
+         * Fills the realm dropdown with available authentication realms.
+         */
+        public ListBoxModel doFillRealmItems() {
+            ListBoxModel items = new ListBoxModel();
+            items.add("Proxmox VE (pve)", "pve");
+            items.add("Linux PAM (pam)", "pam");
+            return items;
+        }
+
+        /**
+         * Fills the credentials dropdown with available username/password credentials.
+         */
+        public ListBoxModel doFillCredentialsIdItems() {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+            return new StandardListBoxModel()
+                .includeEmptyValue()
+                .includeAs(ACL.SYSTEM2, Jenkins.get(), StandardUsernamePasswordCredentials.class);
         }
 
         @POST
         public FormValidation doTestConnection(
                 @QueryParameter String hostname,
-                @QueryParameter String username,
+                @QueryParameter String credentialsId,
                 @QueryParameter String realm,
-                @QueryParameter Secret password,
                 @QueryParameter Boolean ignoreSSL) {
             Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             try {
                 if (hostname.isEmpty()) {
                     return fieldNotSpecifiedError("Hostname");
                 }
-                if (username.isEmpty()) {
-                    return fieldNotSpecifiedError("Username");
+                if (Util.fixEmptyAndTrim(credentialsId) == null) {
+                    return fieldNotSpecifiedError("Credentials");
                 }
+
+                // Resolve credentials
+                List<StandardUsernamePasswordCredentials> credentials = CredentialsProvider.lookupCredentialsInItemGroup(
+                    StandardUsernamePasswordCredentials.class,
+                    Jenkins.get(),
+                    ACL.SYSTEM2,
+                    Collections.<DomainRequirement>emptyList()
+                );
+
+                StandardUsernamePasswordCredentials creds = null;
+                for (StandardUsernamePasswordCredentials cred : credentials) {
+                    if (credentialsId.equals(cred.getId())) {
+                        creds = cred;
+                        break;
+                    }
+                }
+
+                if (creds == null) {
+                    return FormValidation.error("Selected credentials not found. Please select valid credentials.");
+                }
+
+                String username = creds.getUsername();
+                Secret password = creds.getPassword();
                 if (realm.isEmpty()) {
                     return fieldNotSpecifiedError("Realm");
                 }
@@ -187,7 +1045,9 @@ public class Datacenter extends Cloud {
                     return fieldNotSpecifiedError("Password");
                 }
 
-                Connector pveConnector = new Connector(hostname, username, realm, password, ignoreSSL);
+                // Handle null ignoreSSL parameter (defaults to false if not specified)
+                boolean shouldIgnoreSSL = ignoreSSL != null && ignoreSSL;
+                Connector pveConnector = new Connector(hostname, username, realm, password, shouldIgnoreSSL);
                 pveConnector.login();
                 return FormValidation.ok("Login successful");
 
@@ -195,7 +1055,138 @@ public class Datacenter extends Cloud {
                 LOGGER.log(Level.SEVERE, "Authentication error", e);
                 return FormValidation.error(
                         "Authentication error. Please verify your login credentials or check logs.");
+            } catch (Exception e) {
+                LOGGER.log(Level.SEVERE, "Connection error", e);
+                
+                // Check for SSL certificate errors in the exception chain
+                Throwable cause = e;
+                while (cause != null) {
+                    if (cause instanceof javax.net.ssl.SSLHandshakeException) {
+                        return FormValidation.error(
+                                "SSL certificate validation failed. Either add the certificate to your truststore or enable 'Ignore SSL certificates' option.");
+                    }
+                    cause = cause.getCause();
+                }
+                
+                return FormValidation.error(
+                        "Connection error: " + e.getMessage() + ". Please verify your hostname, SSL settings, or check logs.");
             }
         }
+        
+        public FormValidation doCheckCloudHealth(@QueryParameter String datacenterDescription) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+            
+            if (datacenterDescription == null || datacenterDescription.trim().isEmpty()) {
+                return FormValidation.warning("No datacenter selected");
+            }
+            
+            // Find the datacenter instance
+            Datacenter datacenter = null;
+            for (hudson.slaves.Cloud cloud : Jenkins.get().clouds) {
+                if (cloud instanceof Datacenter) {
+                    Datacenter dc = (Datacenter) cloud;
+                    if (datacenterDescription.equals(dc.getDatacenterDescription())) {
+                        datacenter = dc;
+                        break;
+                    }
+                }
+            }
+            
+            if (datacenter == null) {
+                return FormValidation.error("Datacenter not found: " + datacenterDescription);
+            }
+            
+            try {
+                datacenter.updateStatistics();
+                String healthSummary = datacenter.getHealthSummary();
+                
+                if (healthSummary.contains("❌")) {
+                    return FormValidation.error("Health Check Failed: " + healthSummary);
+                } else if (healthSummary.contains("⚠️")) {
+                    return FormValidation.warning("Health Check Warning: " + healthSummary);
+                } else {
+                    return FormValidation.ok("Health Check Passed: " + healthSummary);
+                }
+                
+            } catch (Exception e) {
+                LOGGER.log(Level.SEVERE, "Health check failed for " + datacenterDescription, e);
+                return FormValidation.error("Health check failed: " + e.getMessage());
+            }
+        }
+        
+        public FormValidation doGetDetailedStatistics(@QueryParameter String datacenterDescription) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+            
+            if (datacenterDescription == null || datacenterDescription.trim().isEmpty()) {
+                return FormValidation.warning("No datacenter selected");
+            }
+            
+            // Find the datacenter instance
+            Datacenter datacenter = null;
+            for (hudson.slaves.Cloud cloud : Jenkins.get().clouds) {
+                if (cloud instanceof Datacenter) {
+                    Datacenter dc = (Datacenter) cloud;
+                    if (datacenterDescription.equals(dc.getDatacenterDescription())) {
+                        datacenter = dc;
+                        break;
+                    }
+                }
+            }
+            
+            if (datacenter == null) {
+                return FormValidation.error("Datacenter not found: " + datacenterDescription);
+            }
+            
+            try {
+                datacenter.updateStatistics();
+                String detailedReport = datacenter.getDetailedStatisticsReport();
+                return FormValidation.ok(detailedReport);
+            } catch (Exception e) {
+                LOGGER.log(Level.SEVERE, "Failed to get statistics for " + datacenterDescription, e);
+                return FormValidation.error("Failed to get statistics: " + e.getMessage());
+            }
+        }
+    }
+    
+    /**
+     * Provides access to the detailed status page.
+     * This method makes the status.jelly page accessible via URL.
+     */
+    public Object getStatus() {
+        return this;
+    }
+    
+    /**
+     * Manual cleanup action accessible from the web UI.
+     */
+    @POST
+    public void doCleanupOrphans(StaplerRequest2 req, org.kohsuke.stapler.StaplerResponse2 rsp) throws Exception {
+        Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+
+        LOGGER.log(Level.INFO, "Manual cleanup of orphaned nodes requested for: {0}", getDatacenterDescription());
+        cleanupOrphanedNodes();
+
+        rsp.sendRedirect2(Jenkins.get().getRootUrl() + "manage/cloud");
+    }
+
+    /**
+     * Deletes this cloud from Jenkins configuration.
+     * This method is called when the user clicks "Delete Cloud" from the status page.
+     */
+    @POST
+    public void doDelete(StaplerRequest2 req, org.kohsuke.stapler.StaplerResponse2 rsp) throws Exception {
+        Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+        
+        LOGGER.log(Level.INFO, "Deleting Proxmox cloud: {0}", getDatacenterDescription());
+        
+        // Remove this cloud from Jenkins
+        Jenkins jenkins = Jenkins.get();
+        List<Cloud> clouds = new ArrayList<>(jenkins.clouds);
+        clouds.remove(this);
+        jenkins.clouds.replaceBy(clouds);
+        jenkins.save();
+        
+        // Redirect back to cloud management page
+        rsp.sendRedirect("../");
     }
 }
