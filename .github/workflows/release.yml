@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., 0.8.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Build with Maven
+        run: mvn -B clean package -DskipTests
+
+      - name: Run tests
+        run: mvn -B test
+
+      - name: Get version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Rename artifact as unofficial
+        run: |
+          for f in target/*.hpi; do
+            mv "$f" "${f%.hpi}_unofficial.hpi"
+          done
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          {
+            echo 'notes<<EOF'
+            echo "## Proxmox Plugin v${{ steps.version.outputs.version }} (Unofficial)"
+            echo ""
+            echo "> **Note:** This is an unofficial release. For official releases, see [jenkinsci/proxmox-plugin](https://github.com/jenkinsci/proxmox-plugin)."
+            echo ""
+            echo "### Changes"
+            git log --pretty=format:"- %s" $(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo HEAD~20)..HEAD 2>/dev/null | head -30 || echo "- Release of Proxmox Plugin"
+            echo ""
+            echo "### Installation"
+            echo "Download the \`.hpi\` file and install it via Jenkins > Manage Jenkins > Plugins > Advanced > Deploy Plugin."
+            echo 'EOF'
+          } >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Proxmox Plugin v${{ steps.version.outputs.version }} (Unofficial)
+          body: ${{ steps.notes.outputs.notes }}
+          draft: false
+          prerelease: false
+          files: |
+            target/*.hpi
+          fail_on_unmatched_files: true
