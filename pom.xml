@@ -42,6 +42,10 @@
     <jenkins.version>${jenkins.baseline}.3</jenkins.version>
     <ban-junit4-imports.skip>false</ban-junit4-imports.skip>
     <slf4jVersion>1.7.26</slf4jVersion>
+    <!-- Force English output for compiler and Maven messages -->
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+    <argLine>-Duser.language=en -Duser.country=US</argLine>
   </properties>
 
   <dependencyManagement>
