@@ -29,6 +29,7 @@ import edu.umd.cs.findbugs.annotations.CheckForNull;
 public class VirtualMachineSlave extends AbstractCloudSlave implements TrackedItem {
 
     private static final long serialVersionUID = 1L;
+    private static final java.util.logging.Logger LOGGER = java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName());
 
     private String datacenterDescription;
     private String datacenterNode;
@@ -151,79 +152,75 @@ public class VirtualMachineSlave extends AbstractCloudSlave implements TrackedIt
     public void incrementBuildsExecuted() {
         buildsExecuted++;
         if (limitedBuildsCount > 0 && buildsExecuted >= limitedBuildsCount) {
-            try {
-                // Stop and delete the VM from Proxmox first
-                Datacenter datacenter = getDatacenterByDescriptionFromSlave(datacenterDescription);
-                if (datacenter != null && virtualMachineId != null && datacenterNode != null) {
-                    try {
-                        Connector pveApi = datacenter.proxmoxInstance();
-
-                        // Stop the VM first
-                        java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName())
-                            .log(java.util.logging.Level.INFO,
-                                "Stopping VM " + virtualMachineId + " before deletion");
-                        String stopTask = pveApi.stopQemuMachine(datacenterNode, virtualMachineId);
-
-                        // Wait for stop task to complete
-                        try {
-                            JSONObject stopResult = pveApi.waitForTaskToFinish(datacenterNode, stopTask);
-                            String stopStatus = stopResult.getString("status");
-                            java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName())
-                                .log(java.util.logging.Level.INFO,
-                                    "VM " + virtualMachineId + " stop completed with status: " + stopStatus);
-                        } catch (Exception stopWaitError) {
-                            java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName())
-                                .log(java.util.logging.Level.WARNING,
-                                    "Failed to wait for VM stop: " + stopWaitError.getMessage());
-                        }
-
-                        // Now delete the VM
-                        String deleteTask = pveApi.deleteQemuMachine(datacenterNode, virtualMachineId);
-                        java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName())
-                            .log(java.util.logging.Level.INFO,
-                                "VM " + virtualMachineId + " deletion initiated (task: " + deleteTask + ")");
-                    } catch (Exception vmDeleteError) {
-                        java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName())
-                            .log(java.util.logging.Level.WARNING,
-                                "Failed to stop/delete VM " + virtualMachineId + " from Proxmox: " + vmDeleteError.getMessage());
-                    }
-                }
-
-                // Close the channel before removing the node to prevent WebSocket timeout errors
-                Computer computer = toComputer();
-                if (computer != null && computer.getChannel() != null) {
-                    try {
-                        computer.getChannel().close();
-                        java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName())
-                            .log(java.util.logging.Level.INFO, "Agent " + getNodeName() + " channel closed before removal");
-                    } catch (Exception channelCloseError) {
-                        java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName())
-                            .log(java.util.logging.Level.WARNING,
-                                "Failed to close channel before removal: " + channelCloseError.getMessage());
-                    }
-                }
-
-                // Remove the node from Jenkins after limited builds reached
-                Jenkins jenkins = Jenkins.get();
-                jenkins.removeNode(this);
-                java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName())
-                    .log(java.util.logging.Level.INFO,
-                        "Agent {0} deprovisioned after {1} builds",
-                        new Object[]{getNodeName(), limitedBuildsCount});
-            } catch (Exception e) {
-                // Log but don't fail the build
-                java.util.logging.Logger.getLogger(VirtualMachineSlave.class.getName())
-                    .log(java.util.logging.Level.WARNING, "Failed to deprovision agent after limited builds", e);
-            }
+            deprovisionAfterLimitedBuilds();
         }
     }
 
-    private Datacenter getDatacenterByDescriptionFromSlave(String datacenterDescription) {
-        if (datacenterDescription != null && !datacenterDescription.equals("")) {
-            for (Cloud cloud : Jenkins.get().clouds) {
-                if (cloud instanceof Datacenter && ((Datacenter) cloud).getDatacenterDescription().equals(datacenterDescription)) {
-                    return (Datacenter) cloud;
-                }
+    private void deprovisionAfterLimitedBuilds() {
+        try {
+            stopAndDeleteVM();
+            closeChannel();
+            Jenkins.get().removeNode(this);
+            LOGGER.log(java.util.logging.Level.INFO, "Agent {0} deprovisioned after {1} builds",
+                    new Object[]{getNodeName(), limitedBuildsCount});
+        } catch (Exception e) {
+            LOGGER.log(java.util.logging.Level.WARNING, "Failed to deprovision agent after limited builds", e);
+        }
+    }
+
+    private void stopAndDeleteVM() {
+        Datacenter datacenter = findDatacenter(datacenterDescription);
+        if (datacenter == null || virtualMachineId == null || datacenterNode == null) {
+            return;
+        }
+        try {
+            Connector pveApi = datacenter.proxmoxInstance();
+            LOGGER.log(java.util.logging.Level.INFO, "Stopping VM {0} before deletion", virtualMachineId);
+            String stopTask = pveApi.stopQemuMachine(datacenterNode, virtualMachineId);
+            waitForStopTask(pveApi, stopTask);
+            pveApi.deleteQemuMachine(datacenterNode, virtualMachineId);
+            LOGGER.log(java.util.logging.Level.INFO, "VM {0} deletion initiated", virtualMachineId);
+        } catch (Exception e) {
+            LOGGER.log(java.util.logging.Level.WARNING, "Failed to stop/delete VM {0}: {1}",
+                    new Object[]{virtualMachineId, e.getMessage()});
+        }
+    }
+
+    private void waitForStopTask(Connector pveApi, String stopTask) {
+        try {
+            JSONObject stopResult = pveApi.waitForTaskToFinish(datacenterNode, stopTask);
+            LOGGER.log(java.util.logging.Level.INFO, "VM {0} stop completed: {1}",
+                    new Object[]{virtualMachineId, stopResult.getString("status")});
+        } catch (Exception e) {
+            LOGGER.log(java.util.logging.Level.WARNING, "Failed to wait for VM stop: {0}", e.getMessage());
+        }
+    }
+
+    private void closeChannel() {
+        Computer computer = toComputer();
+        if (computer == null || computer.getChannel() == null) {
+            return;
+        }
+        try {
+            computer.getChannel().close();
+            LOGGER.log(java.util.logging.Level.INFO, "Agent {0} channel closed", getNodeName());
+        } catch (Exception e) {
+            LOGGER.log(java.util.logging.Level.WARNING, "Failed to close channel: {0}", e.getMessage());
+        }
+    }
+
+    /**
+     * Find a Datacenter by its description.
+     * @param description the datacenter description to search for
+     * @return the Datacenter or null if not found
+     */
+    static Datacenter findDatacenter(String description) {
+        if (description == null || description.isEmpty()) {
+            return null;
+        }
+        for (Cloud cloud : Jenkins.get().clouds) {
+            if (cloud instanceof Datacenter && description.equals(((Datacenter) cloud).getDatacenterDescription())) {
+                return (Datacenter) cloud;
             }
         }
         return null;
@@ -236,19 +233,18 @@ public class VirtualMachineSlave extends AbstractCloudSlave implements TrackedIt
 
     @Override
     protected void _terminate(hudson.model.TaskListener listener) throws IOException, InterruptedException {
-        // Delegate termination to the datacenter
-        Datacenter datacenter = getDatacenterByDescriptionFromSlave(datacenterDescription);
-        if (datacenter != null) {
-            Computer computer = toComputer();
-            if (computer != null) {
-                listener.getLogger().println("Terminating VM " + virtualMachineId + " through datacenter");
-                datacenter.terminate(computer);
-            } else {
-                listener.getLogger().println("Warning: Cannot terminate - computer is null");
-            }
-        } else {
+        Datacenter datacenter = findDatacenter(datacenterDescription);
+        if (datacenter == null) {
             listener.getLogger().println("Warning: Cannot terminate - datacenter not found: " + datacenterDescription);
+            return;
         }
+        Computer computer = toComputer();
+        if (computer == null) {
+            listener.getLogger().println("Warning: Cannot terminate - computer is null");
+            return;
+        }
+        listener.getLogger().println("Terminating VM " + virtualMachineId + " through datacenter");
+        datacenter.terminate(computer);
     }
 
     @Override
@@ -300,7 +296,7 @@ public class VirtualMachineSlave extends AbstractCloudSlave implements TrackedIt
             ListBoxModel items = new ListBoxModel();
             items.add("[Select]", "");
             try {
-                Datacenter datacenter = getDatacenterByDescription(datacenterDescription);
+                Datacenter datacenter = findDatacenter(datacenterDescription);
                 if (datacenter != null) {
                     for (String node : datacenter.getNodes()) {
                         items.add(node);
@@ -320,7 +316,7 @@ public class VirtualMachineSlave extends AbstractCloudSlave implements TrackedIt
             ListBoxModel items = new ListBoxModel();
             items.add("[Select]", "");
             try {
-                Datacenter datacenter = getDatacenterByDescription(datacenterDescription);
+                Datacenter datacenter = findDatacenter(datacenterDescription);
                 if (datacenter != null) {
                     HashMap<String, Integer> machines = datacenter.getQemuMachines(datacenterNode);
                     for (Map.Entry<String, Integer> me : machines.entrySet()) {
@@ -342,7 +338,7 @@ public class VirtualMachineSlave extends AbstractCloudSlave implements TrackedIt
             ListBoxModel items = new ListBoxModel();
             items.add("[Select]", "");
             try {
-                Datacenter datacenter = getDatacenterByDescription(datacenterDescription);
+                Datacenter datacenter = findDatacenter(datacenterDescription);
                 if (datacenter != null && virtualMachineId != null && virtualMachineId.length() != 0) {
                     Integer vmId = Integer.parseInt(virtualMachineId);
                     for (String snapshot : datacenter.getQemuMachineSnapshots(datacenterNode, vmId)) {
@@ -387,7 +383,7 @@ public class VirtualMachineSlave extends AbstractCloudSlave implements TrackedIt
                 @QueryParameter Integer virtualMachineId,
                 @QueryParameter String snapshotName) {
             Jenkins.get().checkPermission(Jenkins.ADMINISTER);
-            Datacenter datacenter = getDatacenterByDescription(datacenterDescription);
+            Datacenter datacenter = findDatacenter(datacenterDescription);
             if (datacenter == null) return FormValidation.error("Datacenter not found!");
             Connector pveApi = datacenter.proxmoxInstance();
             try {
@@ -404,7 +400,7 @@ public class VirtualMachineSlave extends AbstractCloudSlave implements TrackedIt
                 @QueryParameter String datacenterNode,
                 @QueryParameter Integer virtualMachineId) {
             Jenkins.get().checkPermission(Jenkins.ADMINISTER);
-            Datacenter datacenter = getDatacenterByDescription(datacenterDescription);
+            Datacenter datacenter = findDatacenter(datacenterDescription);
             if (datacenter == null) return FormValidation.error("Datacenter not found!");
             Connector pveApi = datacenter.proxmoxInstance();
             try {
@@ -427,7 +423,7 @@ public class VirtualMachineSlave extends AbstractCloudSlave implements TrackedIt
                 @QueryParameter String datacenterNode,
                 @QueryParameter Integer virtualMachineId) {
             Jenkins.get().checkPermission(Jenkins.ADMINISTER);
-            Datacenter datacenter = getDatacenterByDescription(datacenterDescription);
+            Datacenter datacenter = findDatacenter(datacenterDescription);
             if (datacenter == null) return FormValidation.error("Datacenter not found!");
             Connector pveApi = datacenter.proxmoxInstance();
             try {
@@ -450,7 +446,7 @@ public class VirtualMachineSlave extends AbstractCloudSlave implements TrackedIt
                 @QueryParameter String datacenterNode,
                 @QueryParameter Integer virtualMachineId) {
             Jenkins.get().checkPermission(Jenkins.ADMINISTER);
-            Datacenter datacenter = getDatacenterByDescription(datacenterDescription);
+            Datacenter datacenter = findDatacenter(datacenterDescription);
             if (datacenter == null) return FormValidation.error("Datacenter not found!");
             Connector pveApi = datacenter.proxmoxInstance();
             try {
@@ -491,17 +487,6 @@ public class VirtualMachineSlave extends AbstractCloudSlave implements TrackedIt
             }
         }
 
-        private Datacenter getDatacenterByDescription(String datacenterDescription) {
-            if (datacenterDescription != null && !datacenterDescription.equals("")) {
-                for (Cloud cloud : Jenkins.get().clouds) {
-                    if (cloud instanceof Datacenter
-                            && ((Datacenter) cloud).getDatacenterDescription().equals(datacenterDescription)) {
-                        return (Datacenter) cloud;
-                    }
-                }
-            }
-            return null;
-        }
     }
 
     /**
