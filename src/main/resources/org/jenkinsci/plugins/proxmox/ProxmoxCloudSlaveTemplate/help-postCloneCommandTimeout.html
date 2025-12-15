@@ -1,0 +1,24 @@
+<div>
+    <p>
+        <strong>Timeout for Post-Clone Command Execution</strong>
+    </p>
+    <p>
+        Maximum time (in seconds) to wait for the post-clone command to complete via the QEMU Guest Agent.
+    </p>
+    <p>
+        <strong>Recommendations:</strong>
+    </p>
+    <ul>
+        <li><strong>Simple commands:</strong> 60-120 seconds (e.g., hostname setup, DNS configuration)</li>
+        <li><strong>Package installations:</strong> 300-600 seconds (e.g., apt/yum updates)</li>
+        <li><strong>Complex scripts:</strong> 600-3600 seconds (e.g., application deployment)</li>
+    </ul>
+    <p>
+        <strong>Important:</strong> If the command exceeds the timeout, the provisioning will fail.
+        Set a generous timeout for commands that may take longer to execute.
+    </p>
+    <p>
+        <strong>Default:</strong> 300 seconds (5 minutes)<br>
+        <strong>Range:</strong> 1-3600 seconds (1 second to 1 hour)
+    </p>
+</div>

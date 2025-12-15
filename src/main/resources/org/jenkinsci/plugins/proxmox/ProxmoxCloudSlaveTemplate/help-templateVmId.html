@@ -1,0 +1,26 @@
+<div>
+    <p>
+        The VM ID of the template VM to use for creating Jenkins agents.
+    </p>
+    <p>
+        This dropdown shows all VMs on the selected Proxmox node. The template VM should be:
+    </p>
+    <ul>
+        <li>Properly configured with the Jenkins agent runtime environment</li>
+        <li>Have a snapshot (recommended) for faster cloning</li>
+        <li>Either marked as a template in Proxmox or left as a regular VM</li>
+    </ul>
+    <p>
+        <strong>Template VM Requirements:</strong>
+    </p>
+    <ul>
+        <li>Java runtime installed (version matching your Jenkins controller)</li>
+        <li>Network configuration (DHCP or cloud-init for static IPs)</li>
+        <li>User account for Jenkins agent connection</li>
+        <li>Any build tools or software needed for your jobs</li>
+    </ul>
+    <p>
+        <strong>Tip:</strong> Use the "Check Template VM Status" button after selection to verify the
+        template is accessible and properly configured.
+    </p>
+</div>
