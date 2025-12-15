@@ -1,0 +1,24 @@
+<div>
+    <p>
+        <strong>Startup Waiting Period</strong>
+    </p>
+    <p>
+        Time (in seconds) to wait after starting the VM before attempting to connect the agent.
+        This allows the VM's operating system and services to fully initialize.
+    </p>
+    <p>
+        <strong>Typical values:</strong>
+    </p>
+    <ul>
+        <li><strong>Linux VMs:</strong> 30-60 seconds</li>
+        <li><strong>Windows VMs:</strong> 60-120 seconds</li>
+        <li><strong>VMs with many services:</strong> 90-180 seconds</li>
+    </ul>
+    <p>
+        <strong>Note:</strong> If using QEMU Guest Agent with "Wait for agent ready" enabled,
+        this can be set lower as the plugin will wait for the guest agent to report readiness.
+    </p>
+    <p>
+        <strong>Default:</strong> 60 seconds
+    </p>
+</div>
