@@ -30,16 +30,18 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
     @Deprecated
     private transient int WAIT_TIME_MS;
 
-    private transient String datacenterDescription;
-    private transient String datacenterNode;
-    private transient Integer virtualMachineId;
-    private transient String snapshotName;
-    private transient Boolean startVM;
-    private transient int waitingTimeSecs;
+    private final String datacenterDescription;
+    private final String datacenterNode;
+    private final Integer virtualMachineId;
+    private final String snapshotName;
+    private final Boolean startVM;
+    private final int waitingTimeSecs;
 
     public static enum RevertPolicy {
+        NEVER("Never revert"),
         AFTER_CONNECT("After connect to the virtual machine"),
-        BEFORE_JOB("Before every job executing on the virtual machine");
+        BEFORE_JOB("Before every job executing on the virtual machine"),
+        AFTER_JOB("After every job executing on the virtual machine");
 
         private final String label;
 
@@ -80,6 +82,7 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
      * @throws ObjectStreamException if something went wrong.
      */
     private Object readResolve() throws ObjectStreamException {
+        // Handle migration from old instances with delegate field
         if (delegate != null) {
             return new VirtualMachineLauncher(
                     delegate,
@@ -91,6 +94,10 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
                     WAIT_TIME_MS / 1000,
                     revertPolicy);
         }
+        
+        // Note: Jenkins warning about not calling super.readResolve(), but DelegatingComputerLauncher
+        // does not have a readResolve() method. This implementation handles backward compatibility
+        // for instances with the deprecated delegate field.
         return this;
     }
 
@@ -104,11 +111,18 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
     }
 
     public Datacenter findDatacenterInstance() throws RuntimeException {
+        return findDatacenterInstance(null);
+    }
+    
+    public Datacenter findDatacenterInstance(TaskListener taskListener) throws RuntimeException {
         if (datacenterDescription != null && virtualMachineId != null) {
             for (Cloud cloud : Jenkins.get().clouds) {
-                if (cloud instanceof Datacenter
-                        && ((Datacenter) cloud).getDatacenterDescription().equals(datacenterDescription)) {
-                    return (Datacenter) cloud;
+                if (cloud instanceof Datacenter) {
+                    Datacenter datacenter = (Datacenter) cloud;
+                    String cloudDescription = datacenter.getDatacenterDescription();
+                    if (cloudDescription != null && cloudDescription.equals(datacenterDescription)) {
+                        return datacenter;
+                    }
                 }
             }
         }
@@ -150,21 +164,40 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
         JSONObject taskStatus = null;
 
         try {
-            Datacenter datacenter = findDatacenterInstance();
+            Datacenter datacenter = findDatacenterInstance(taskListener);
             Connector pve = datacenter.proxmoxInstance();
 
             if (!snapshotName.equals("current")) {
+                // Check VM state before rollback
+                boolean wasRunning = pve.isQemuMachineRunning(datacenterNode, virtualMachineId);
+                taskListener.getLogger().println("VM \"" + virtualMachineId + "\" current state: " + 
+                    (wasRunning ? "running" : "stopped"));
+
+                // Stop VM if it's running before snapshot rollback
+                if (wasRunning) {
+                    taskListener.getLogger().println("Stopping VM before snapshot rollback...");
+                    taskId = pve.stopQemuMachine(datacenterNode, virtualMachineId);
+                    taskStatus = pve.waitForTaskToFinish(datacenterNode, taskId);
+                    taskListener.getLogger().println("Stop task finished: " + taskStatus.toString());
+                }
+
                 taskListener
                         .getLogger()
                         .println("Virtual machine \"" + virtualMachineId + "\" (Name \""
-                                + slaveComputer.getDisplayName() + "\") is being reverted...");
-                // TODO: Check the status of this task (pass/fail) not just that its finished
+                                + slaveComputer.getDisplayName() + "\") is being reverted to snapshot \"" 
+                                + snapshotName + "\"...");
+                
                 taskId = pve.rollbackQemuMachineSnapshot(datacenterNode, virtualMachineId, snapshotName);
-                taskListener.getLogger().println("Proxmox returned: " + taskId);
+                taskListener.getLogger().println("Rollback task ID: " + taskId);
 
-                // Wait for the task to finish
+                // Wait for the rollback task to finish and check status
                 taskStatus = pve.waitForTaskToFinish(datacenterNode, taskId);
-                taskListener.getLogger().println("Task finished! Status object: " + taskStatus.toString());
+                String exitStatus = taskStatus.optString("exitstatus", "unknown");
+                taskListener.getLogger().println("Rollback task finished with status: " + exitStatus);
+                
+                if (!"OK".equals(exitStatus)) {
+                    taskListener.getLogger().println("WARNING: Rollback task may have failed. Status: " + taskStatus.toString());
+                }
             }
 
             if (startVM) {
@@ -173,6 +206,8 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
 
         } catch (LoginException e) {
             taskListener.getLogger().println("ERROR: Login failed: " + e.getMessage());
+        } catch (Exception e) {
+            taskListener.getLogger().println("ERROR: Snapshot revert failed: " + e.getMessage());
         }
 
         // Ignore the wait period for a JNLP agent as it connects back to the Jenkins instance.
@@ -186,7 +221,7 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
             throws IOException, InterruptedException {
         if (revertPolicy == RevertPolicy.AFTER_CONNECT) {
             revertSnapshot(slaveComputer, taskListener);
-        } else {
+        } else if (revertPolicy != RevertPolicy.NEVER) {
             if (startVM) {
                 startSlaveIfNeeded(taskListener);
             }
