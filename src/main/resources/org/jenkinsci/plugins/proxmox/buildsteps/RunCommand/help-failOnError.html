@@ -1,0 +1,30 @@
+<div>
+    <p>
+        <strong>Fail Build on Command Error</strong>
+    </p>
+    <p>
+        Determines whether the build should fail if the command returns a non-zero exit code.
+    </p>
+    <p>
+        <strong>Enabled (default):</strong>
+    </p>
+    <ul>
+        <li>Non-zero exit code → Build step fails</li>
+        <li>Build marked as failed</li>
+        <li>Subsequent steps may be skipped (depending on build configuration)</li>
+        <li>Recommended for critical operations</li>
+    </ul>
+    <p>
+        <strong>Disabled:</strong>
+    </p>
+    <ul>
+        <li>Command errors are logged but don't fail the build</li>
+        <li>Build continues regardless of exit code</li>
+        <li>Useful for optional or non-critical operations</li>
+        <li>Good for cleanup tasks that shouldn't block the build</li>
+    </ul>
+    <p>
+        <strong>Note:</strong> This option only applies when "Wait for completion" is enabled.
+        If not waiting, the exit code cannot be checked.
+    </p>
+</div>
