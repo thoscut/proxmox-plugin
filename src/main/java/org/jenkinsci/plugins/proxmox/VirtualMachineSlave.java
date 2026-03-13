@@ -210,7 +210,7 @@ public class VirtualMachineSlave extends Slave {
             return datacenterDescription;
         }
 
-        public String getDatecenterNode() {
+        public String getDatacenterNode() {
             return datacenterNode;
         }
 

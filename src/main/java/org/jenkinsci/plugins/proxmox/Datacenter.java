@@ -116,7 +116,7 @@ public class Datacenter extends Cloud {
     }
 
     public List<String> getQemuMachineSnapshots(String node, Integer vmid) {
-        if (node == null || node.isEmpty() || vmid < 1) {
+        if (node == null || node.isEmpty() || vmid == null || vmid < 1) {
             return new ArrayList<String>();
         }
 

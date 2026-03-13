@@ -30,12 +30,12 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
     @Deprecated
     private transient int WAIT_TIME_MS;
 
-    private transient String datacenterDescription;
-    private transient String datacenterNode;
-    private transient Integer virtualMachineId;
-    private transient String snapshotName;
-    private transient Boolean startVM;
-    private transient int waitingTimeSecs;
+    private String datacenterDescription;
+    private String datacenterNode;
+    private Integer virtualMachineId;
+    private String snapshotName;
+    private Boolean startVM;
+    private int waitingTimeSecs;
 
     public static enum RevertPolicy {
         AFTER_CONNECT("After connect to the virtual machine"),
@@ -167,7 +167,7 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
                 taskListener.getLogger().println("Task finished! Status object: " + taskStatus.toString());
             }
 
-            if (startVM) {
+            if (Boolean.TRUE.equals(startVM)) {
                 startSlaveIfNeeded(taskListener);
             }
 
@@ -177,7 +177,7 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
 
         // Ignore the wait period for a JNLP agent as it connects back to the Jenkins instance.
         if (!(launcher instanceof JNLPLauncher)) {
-            Thread.sleep(waitingTimeSecs * 1000);
+            Thread.sleep((long) waitingTimeSecs * 1000);
         }
     }
 
@@ -187,7 +187,7 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
         if (revertPolicy == RevertPolicy.AFTER_CONNECT) {
             revertSnapshot(slaveComputer, taskListener);
         } else {
-            if (startVM) {
+            if (Boolean.TRUE.equals(startVM)) {
                 startSlaveIfNeeded(taskListener);
             }
         }

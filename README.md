@@ -42,7 +42,7 @@ enter a name for the node.
 To run directly a Jenkins test instance with the plugin, run ``mvn hpi:run``.
 
 
-## ChangLog
+## ChangeLog
 -   For recent versions, see [GitHub Releases](https://github.com/jenkinsci/proxmox-plugin/releases)
 -   For versions 0.2.1 and older, see the [Wiki page](https://wiki.jenkins.io/display/JENKINS/Proxmox+Plugin)
 
