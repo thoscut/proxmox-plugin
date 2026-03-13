@@ -146,6 +146,7 @@ public class VirtualMachineSlave extends Slave {
         }
 
         public ListBoxModel doFillDatacenterDescriptionItems() {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             ListBoxModel items = new ListBoxModel();
             items.add("[Select]", "");
             for (Cloud cloud : Jenkins.get().clouds) {
@@ -197,10 +198,14 @@ public class VirtualMachineSlave extends Slave {
             ListBoxModel items = new ListBoxModel();
             items.add("[Select]", "");
             Datacenter datacenter = getDatacenterByDescription(datacenterDescription);
-            if (datacenter != null && virtualMachineId != null && virtualMachineId.length() != 0) {
-                for (String snapshot :
-                        datacenter.getQemuMachineSnapshots(datacenterNode, Integer.parseInt(virtualMachineId))) {
-                    items.add(snapshot);
+            if (datacenter != null && virtualMachineId != null && !virtualMachineId.isEmpty()) {
+                try {
+                    int vmid = Integer.parseInt(virtualMachineId);
+                    for (String snapshot : datacenter.getQemuMachineSnapshots(datacenterNode, vmid)) {
+                        items.add(snapshot);
+                    }
+                } catch (NumberFormatException e) {
+                    // virtualMachineId is not a valid integer, return empty list
                 }
             }
             return items;

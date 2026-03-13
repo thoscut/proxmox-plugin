@@ -181,7 +181,7 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
             Datacenter datacenter = findDatacenterInstance();
             Connector pve = datacenter.proxmoxInstance();
 
-            if (!snapshotName.equals("current")) {
+            if (!"current".equals(snapshotName)) {
                 taskListener
                         .getLogger()
                         .println("Virtual machine \"" + virtualMachineId + "\" (Name \""
@@ -237,7 +237,7 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
             Connector pve = datacenter.proxmoxInstance();
             taskId = pve.shutdownQemuMachine(datacenterNode, virtualMachineId);
             taskStatus = pve.waitForTaskToFinish(datacenterNode, taskId);
-            if (!taskStatus.getString("exitstatus").equals("OK")) {
+            if (!taskStatus.has("exitstatus") || !taskStatus.getString("exitstatus").equals("OK")) {
                 // Graceful shutdown failed, so doing a stop.
                 taskListener
                         .getLogger()

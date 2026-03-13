@@ -57,7 +57,7 @@ public class Connector implements AutoCloseable {
         this.password = password;
 
         this.unirest = Unirest.spawnInstance();
-        unirest.config().verifySsl(!ignoreSSL);
+        unirest.config().verifySsl(!Boolean.TRUE.equals(ignoreSSL));
 
         this.authTicketIssuedTimestamp = null;
         this.baseURL = "https://" + hostname + ":" + port.toString() + "/api2/json/";

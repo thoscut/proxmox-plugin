@@ -187,9 +187,10 @@ public class Datacenter extends Cloud {
                     return fieldNotSpecifiedError("Password");
                 }
 
-                Connector pveConnector = new Connector(hostname, username, realm, password, ignoreSSL);
-                pveConnector.login();
-                return FormValidation.ok("Login successful");
+                try (Connector pveConnector = new Connector(hostname, username, realm, password, ignoreSSL)) {
+                    pveConnector.login();
+                    return FormValidation.ok("Login successful");
+                }
 
             } catch (LoginException e) {
                 LOGGER.log(Level.SEVERE, "Authentication error", e);
