@@ -103,6 +103,34 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
         return launcher;
     }
 
+    public String getDatacenterDescription() {
+        return datacenterDescription;
+    }
+
+    public String getDatacenterNode() {
+        return datacenterNode;
+    }
+
+    public Integer getVirtualMachineId() {
+        return virtualMachineId;
+    }
+
+    public String getSnapshotName() {
+        return snapshotName;
+    }
+
+    public Boolean getStartVM() {
+        return startVM;
+    }
+
+    public int getWaitingTimeSecs() {
+        return waitingTimeSecs;
+    }
+
+    public RevertPolicy getRevertPolicy() {
+        return revertPolicy;
+    }
+
     public Datacenter findDatacenterInstance() throws RuntimeException {
         if (datacenterDescription != null && virtualMachineId != null) {
             for (Cloud cloud : Jenkins.get().clouds) {
