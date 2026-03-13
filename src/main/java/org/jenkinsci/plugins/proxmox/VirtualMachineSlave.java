@@ -205,7 +205,7 @@ public class VirtualMachineSlave extends Slave {
                         items.add(snapshot);
                     }
                 } catch (NumberFormatException e) {
-                    // virtualMachineId is not a valid integer, return empty list
+                    // invalid virtualMachineId input; skip populating snapshots
                 }
             }
             return items;
