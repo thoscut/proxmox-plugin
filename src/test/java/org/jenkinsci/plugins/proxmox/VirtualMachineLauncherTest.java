@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
-import java.util.List;
 import org.jenkinsci.plugins.proxmox.VirtualMachineLauncher.RevertPolicy;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -18,19 +17,6 @@ import org.junit.jupiter.params.provider.ValueSource;
  * Validates field persistence, null safety, and enum behavior.
  */
 class VirtualMachineLauncherTest {
-
-    /**
-     * Fields that must be persisted (not transient) to survive Jenkins restarts.
-     * This was a critical bug where these fields were incorrectly marked transient.
-     */
-    private static final List<String> PERSISTED_FIELDS = List.of(
-            "datacenterDescription",
-            "datacenterNode",
-            "virtualMachineId",
-            "snapshotName",
-            "startVM",
-            "waitingTimeSecs",
-            "revertPolicy");
 
     @ParameterizedTest
     @ValueSource(
