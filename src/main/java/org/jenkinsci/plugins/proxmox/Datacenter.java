@@ -116,7 +116,7 @@ public class Datacenter extends Cloud {
     }
 
     public List<String> getQemuMachineSnapshots(String node, Integer vmid) {
-        if (node == null || node.isEmpty() || vmid < 1) {
+        if (node == null || node.isEmpty() || vmid == null || vmid < 1) {
             return new ArrayList<String>();
         }
 
@@ -187,9 +187,10 @@ public class Datacenter extends Cloud {
                     return fieldNotSpecifiedError("Password");
                 }
 
-                Connector pveConnector = new Connector(hostname, username, realm, password, ignoreSSL);
-                pveConnector.login();
-                return FormValidation.ok("Login successful");
+                try (Connector pveConnector = new Connector(hostname, username, realm, password, ignoreSSL)) {
+                    pveConnector.login();
+                    return FormValidation.ok("Login successful");
+                }
 
             } catch (LoginException e) {
                 LOGGER.log(Level.SEVERE, "Authentication error", e);

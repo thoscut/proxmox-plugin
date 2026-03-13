@@ -18,9 +18,10 @@ import kong.unirest.UnirestInstance;
 import kong.unirest.json.JSONArray;
 import kong.unirest.json.JSONObject;
 
-public class Connector {
+public class Connector implements AutoCloseable {
 
     public static final long WAIT_TIME_MS = 1000;
+    private static final long TASK_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 
     protected Integer port;
     protected String username;
@@ -49,14 +50,14 @@ public class Connector {
                 port = uri.getPort();
             }
         } catch (URISyntaxException e) {
-            e.printStackTrace();
+            LOGGER.log(Level.WARNING, "Failed to parse hostname URI: " + hostname, e);
         }
         this.username = username;
         this.realm = realm;
         this.password = password;
 
         this.unirest = Unirest.spawnInstance();
-        unirest.config().verifySsl(!ignoreSSL).reset();
+        unirest.config().verifySsl(!Boolean.TRUE.equals(ignoreSSL));
 
         this.authTicketIssuedTimestamp = null;
         this.baseURL = "https://" + hostname + ":" + port.toString() + "/api2/json/";
@@ -136,10 +137,16 @@ public class Connector {
     public JSONObject waitForTaskToFinish(String node, String taskId) throws LoginException, InterruptedException {
         JSONObject lastTaskStatus = null;
         Boolean isRunning = true;
+        long startTime = System.currentTimeMillis();
         while (isRunning) {
             lastTaskStatus = getTaskStatus(node, taskId);
             isRunning = (lastTaskStatus.getString("status").equals("running"));
             if (isRunning) {
+                if (System.currentTimeMillis() - startTime > TASK_TIMEOUT_MS) {
+                    LOGGER.log(Level.WARNING, "Task " + taskId + " on node " + node
+                            + " did not finish within timeout period");
+                    break;
+                }
                 Thread.sleep(WAIT_TIME_MS);
             }
         }
@@ -193,7 +200,8 @@ public class Connector {
                 .getString("data");
     }
 
-    protected void finalize() {
+    @Override
+    public void close() {
         unirest.shutDown();
     }
 }
