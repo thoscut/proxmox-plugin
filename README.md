@@ -18,6 +18,8 @@ This plugin allows the use of Proxmox virtual machines as agents in Jenkins.
 -   No option to avoid rolling back to a snapshot on agent start up.
 -   No checking on virtual machine ready state/errors during rollback.
 
+For a detailed comparison with other Jenkins virtualization plugins, see the [Feature Gap Analysis](FEATURE_GAPS.md).
+
 ## Configuration
 
 #### Datacenter cloud
