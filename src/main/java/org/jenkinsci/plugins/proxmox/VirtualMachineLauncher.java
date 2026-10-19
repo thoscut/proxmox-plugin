@@ -1,5 +1,6 @@
 package org.jenkinsci.plugins.proxmox;
 
+import hudson.AbortException;
 import hudson.model.Descriptor;
 import hudson.model.TaskListener;
 import hudson.slaves.Cloud;
@@ -155,57 +156,89 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
         return overrideLaunchSupported;
     }
 
-    public void startSlaveIfNeeded(TaskListener taskListener) throws InterruptedException {
-        String taskId = null;
-        JSONObject taskStatus = null;
+    private Connector proxmoxConnector() throws AbortException {
         try {
-            Datacenter datacenter = findDatacenterInstance();
-            Connector pve = datacenter.proxmoxInstance();
-            Boolean isvmIdRunning = pve.isQemuMachineRunning(datacenterNode, virtualMachineId);
-            if (!isvmIdRunning) {
-                taskListener.getLogger().println("Starting virtual machine...");
-                taskId = pve.startQemuMachine(datacenterNode, virtualMachineId);
-                taskStatus = pve.waitForTaskToFinish(datacenterNode, taskId);
-                taskListener.getLogger().println("Task finished! Status object: " + taskStatus.toString());
-            }
-        } catch (LoginException | IOException e) {
-            taskListener.getLogger().println("ERROR: Proxmox request failed: " + e.getMessage());
+            return findDatacenterInstance().proxmoxInstance();
+        } catch (RuntimeException e) {
+            throw new AbortException(e.getMessage());
         }
     }
 
-    public void revertSnapshot(SlaveComputer slaveComputer, TaskListener taskListener) throws InterruptedException {
-        String taskId = null;
-        JSONObject taskStatus = null;
+    private boolean isSnapshotRevertConfigured() {
+        return snapshotName != null && !snapshotName.isEmpty() && !"current".equals(snapshotName);
+    }
 
-        try {
-            Datacenter datacenter = findDatacenterInstance();
-            Connector pve = datacenter.proxmoxInstance();
-
-            if (!"current".equals(snapshotName)) {
-                taskListener
-                        .getLogger()
-                        .println("Virtual machine \"" + virtualMachineId + "\" (Name \""
-                                + slaveComputer.getDisplayName() + "\") is being reverted...");
-                // TODO: Check the status of this task (pass/fail) not just that its finished
-                taskId = pve.rollbackQemuMachineSnapshot(datacenterNode, virtualMachineId, snapshotName);
-                taskListener.getLogger().println("Proxmox returned: " + taskId);
-
-                // Wait for the task to finish
-                taskStatus = pve.waitForTaskToFinish(datacenterNode, taskId);
-                taskListener.getLogger().println("Task finished! Status object: " + taskStatus.toString());
-            }
-
-            if (Boolean.TRUE.equals(startVM)) {
-                startSlaveIfNeeded(taskListener);
-            }
-
-        } catch (LoginException | IOException e) {
-            taskListener.getLogger().println("ERROR: Proxmox request failed: " + e.getMessage());
-        }
-
+    private void waitForStartup() throws InterruptedException {
         // Ignore the wait period for a JNLP agent as it connects back to the Jenkins instance.
         if (!(launcher instanceof JNLPLauncher)) {
             Thread.sleep((long) waitingTimeSecs * 1000);
+        }
+    }
+
+    /**
+     * Starts the virtual machine unless it is already running.
+     *
+     * @return whether the virtual machine was started.
+     * @throws IOException if the virtual machine could not be started.
+     */
+    public boolean startSlaveIfNeeded(TaskListener taskListener) throws IOException, InterruptedException {
+        Connector pve = proxmoxConnector();
+        try {
+            if (pve.isQemuMachineRunning(datacenterNode, virtualMachineId)) {
+                return false;
+            }
+            taskListener.getLogger().println("Starting virtual machine...");
+            String taskId = pve.startQemuMachine(datacenterNode, virtualMachineId);
+            JSONObject taskStatus = pve.waitForTaskToFinish(datacenterNode, taskId);
+            taskListener.getLogger().println("Task finished! Status object: " + taskStatus);
+            if (!Connector.isTaskSuccessful(taskStatus)) {
+                throw new AbortException("Starting virtual machine \"" + virtualMachineId + "\" failed: " + taskStatus);
+            }
+            return true;
+        } catch (LoginException e) {
+            throw new AbortException("Login to Proxmox failed: " + e.getMessage());
+        } catch (IllegalArgumentException e) {
+            throw new AbortException(e.getMessage());
+        }
+    }
+
+    /**
+     * Reverts the virtual machine to the configured snapshot, starts it if configured and waits for the
+     * configured startup period.
+     *
+     * @throws IOException if reverting or starting the virtual machine failed.
+     */
+    public void revertSnapshot(SlaveComputer slaveComputer, TaskListener taskListener)
+            throws IOException, InterruptedException {
+        boolean revert = isSnapshotRevertConfigured();
+        if (revert) {
+            Connector pve = proxmoxConnector();
+            taskListener
+                    .getLogger()
+                    .println("Virtual machine \"" + virtualMachineId + "\" (Name \""
+                            + slaveComputer.getDisplayName() + "\") is being reverted...");
+            try {
+                String taskId = pve.rollbackQemuMachineSnapshot(datacenterNode, virtualMachineId, snapshotName);
+                taskListener.getLogger().println("Proxmox returned: " + taskId);
+
+                // Wait for the task to finish
+                JSONObject taskStatus = pve.waitForTaskToFinish(datacenterNode, taskId);
+                taskListener.getLogger().println("Task finished! Status object: " + taskStatus);
+                if (!Connector.isTaskSuccessful(taskStatus)) {
+                    throw new AbortException("Reverting virtual machine \"" + virtualMachineId + "\" to snapshot \""
+                            + snapshotName + "\" failed: " + taskStatus);
+                }
+            } catch (LoginException e) {
+                throw new AbortException("Login to Proxmox failed: " + e.getMessage());
+            } catch (IllegalArgumentException e) {
+                throw new AbortException(e.getMessage());
+            }
+        }
+
+        boolean started = Boolean.TRUE.equals(startVM) && startSlaveIfNeeded(taskListener);
+
+        if (revert || started) {
+            waitForStartup();
         }
     }
 
@@ -214,30 +247,24 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
             throws IOException, InterruptedException {
         if (revertPolicy == RevertPolicy.AFTER_CONNECT) {
             revertSnapshot(slaveComputer, taskListener);
-        } else {
-            if (Boolean.TRUE.equals(startVM)) {
-                startSlaveIfNeeded(taskListener);
-            }
+        } else if (Boolean.TRUE.equals(startVM) && startSlaveIfNeeded(taskListener)) {
+            waitForStartup();
         }
 
         launcher.launch(slaveComputer, taskListener);
     }
 
     public void shutdown(SlaveComputer slaveComputer, TaskListener taskListener) {
-        String taskId = null;
-        JSONObject taskStatus = null;
-
         // try to gracefully shutdown the virtual machine
         try {
             taskListener
                     .getLogger()
                     .println("Virtual machine \"" + virtualMachineId + "\" (slave \"" + slaveComputer.getDisplayName()
                             + "\") is being shutdown.");
-            Datacenter datacenter = findDatacenterInstance();
-            Connector pve = datacenter.proxmoxInstance();
-            taskId = pve.shutdownQemuMachine(datacenterNode, virtualMachineId);
-            taskStatus = pve.waitForTaskToFinish(datacenterNode, taskId);
-            if (!taskStatus.has("exitstatus") || !taskStatus.getString("exitstatus").equals("OK")) {
+            Connector pve = proxmoxConnector();
+            String taskId = pve.shutdownQemuMachine(datacenterNode, virtualMachineId);
+            JSONObject taskStatus = pve.waitForTaskToFinish(datacenterNode, taskId);
+            if (!Connector.isTaskSuccessful(taskStatus)) {
                 // Graceful shutdown failed, so doing a stop.
                 taskListener
                         .getLogger()
@@ -247,19 +274,25 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
                 taskId = pve.stopQemuMachine(datacenterNode, virtualMachineId);
                 taskStatus = pve.waitForTaskToFinish(datacenterNode, taskId);
             }
-            taskListener.getLogger().println("Task finished! Status object: " + taskStatus.toString());
+            taskListener.getLogger().println("Task finished! Status object: " + taskStatus);
         } catch (InterruptedException e) {
-            LOGGER.log(Level.SEVERE, "Waiting for task completion failed: " + e.getMessage());
-        } catch (LoginException | IOException e) {
-            LOGGER.log(Level.WARNING, "Proxmox request failed: " + e.getMessage());
+            LOGGER.log(Level.WARNING, "Waiting for task completion was interrupted", e);
+            Thread.currentThread().interrupt();
+        } catch (LoginException | IOException | IllegalArgumentException e) {
+            LOGGER.log(Level.WARNING, "Shutting down virtual machine " + virtualMachineId + " failed", e);
+            taskListener.getLogger().println("ERROR: Shutting down virtual machine failed: " + e.getMessage());
         }
     }
 
     @Override
     public void beforeDisconnect(SlaveComputer slaveComputer, TaskListener taskListener) {
-        if (revertPolicy == RevertPolicy.AFTER_CONNECT) shutdown(slaveComputer, taskListener);
-
-        super.beforeDisconnect(slaveComputer, taskListener);
+        try {
+            if (revertPolicy == RevertPolicy.AFTER_CONNECT) {
+                shutdown(slaveComputer, taskListener);
+            }
+        } finally {
+            super.beforeDisconnect(slaveComputer, taskListener);
+        }
     }
 
     @Override

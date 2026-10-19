@@ -281,12 +281,14 @@ public class Connector implements AutoCloseable {
     }
 
     /**
-     * @return whether the given task status describes a task that finished successfully.
+     * @return whether the given task status describes a task that finished successfully (possibly with warnings).
      */
     public static boolean isTaskSuccessful(JSONObject taskStatus) {
-        return taskStatus != null
-                && "stopped".equals(taskStatus.optString("status"))
-                && "OK".equals(taskStatus.optString("exitstatus"));
+        if (taskStatus == null || !"stopped".equals(taskStatus.optString("status"))) {
+            return false;
+        }
+        String exitStatus = taskStatus.optString("exitstatus");
+        return "OK".equals(exitStatus) || exitStatus.startsWith("WARNINGS");
     }
 
     /**
