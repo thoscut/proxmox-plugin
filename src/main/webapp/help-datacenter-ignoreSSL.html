@@ -1,0 +1,8 @@
+<div>
+    Disables verification of the TLS certificate and hostname of the Proxmox server.
+    <p>
+    <b>Warning:</b> with this option enabled, anyone who can intercept the connection between Jenkins
+    and Proxmox can impersonate the server and capture the configured password. Only use it for
+    test setups; prefer adding the Proxmox CA certificate to the Java trust store of the Jenkins controller.
+    </p>
+</div>
