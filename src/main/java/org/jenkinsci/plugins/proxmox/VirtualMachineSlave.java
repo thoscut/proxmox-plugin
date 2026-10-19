@@ -81,6 +81,25 @@ public class VirtualMachineSlave extends Slave {
         this.startVM = startVM;
         this.startupWaitingPeriodSeconds = startupWaitingPeriodSeconds;
         this.revertPolicy = revertPolicy;
+        checkConfigurePermission();
+    }
+
+    /**
+     * Binding an agent to a virtual machine lets Jenkins control that machine with the credentials of the
+     * datacenter, so it requires the same permission as configuring the datacenter. The agent configuration
+     * may also be submitted as XML (config.xml), so the check is repeated when it is deserialized.
+     */
+    private static void checkConfigurePermission() {
+        Jenkins jenkins = Jenkins.getInstanceOrNull();
+        if (jenkins != null) {
+            jenkins.checkPermission(Jenkins.ADMINISTER);
+        }
+    }
+
+    @Override
+    protected Object readResolve() {
+        checkConfigurePermission();
+        return super.readResolve();
     }
 
     public String getDatacenterDescription() {
