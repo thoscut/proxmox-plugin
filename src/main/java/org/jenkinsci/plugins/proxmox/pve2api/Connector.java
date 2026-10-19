@@ -69,7 +69,7 @@ public class Connector implements AutoCloseable {
      *
      * @throws IllegalArgumentException if the hostname is empty or contains anything besides host and port.
      */
-    static URI buildBaseURL(String hostname) {
+    public static URI buildBaseURL(String hostname) {
         String host = hostname == null ? "" : hostname.trim();
         if (host.endsWith("/")) {
             host = host.substring(0, host.length() - 1);
