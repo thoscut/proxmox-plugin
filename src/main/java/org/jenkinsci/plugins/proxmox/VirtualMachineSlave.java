@@ -14,7 +14,6 @@ import hudson.slaves.RetentionStrategy;
 import hudson.util.FormValidation;
 import hudson.util.ListBoxModel;
 import java.io.IOException;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import javax.security.auth.login.LoginException;
@@ -182,9 +181,9 @@ public class VirtualMachineSlave extends Slave {
             items.add("[Select]", "");
             Datacenter datacenter = getDatacenterByDescription(datacenterDescription);
             if (datacenter != null) {
-                HashMap<String, Integer> machines = datacenter.getQemuMachines(datacenterNode);
-                for (Map.Entry<String, Integer> me : machines.entrySet()) {
-                    items.add(me.getKey().toString(), me.getValue().toString());
+                for (Map.Entry<Integer, String> vm :
+                        datacenter.getQemuMachines(datacenterNode).entrySet()) {
+                    items.add(vm.getValue() + " (" + vm.getKey() + ")", vm.getKey().toString());
                 }
             }
             return items;
@@ -250,6 +249,8 @@ public class VirtualMachineSlave extends Slave {
                 return FormValidation.ok("Returned: " + taskStatus);
             } catch (LoginException e) {
                 return FormValidation.error("Login Failed: " + e.getMessage());
+            } catch (IOException | IllegalArgumentException e) {
+                return FormValidation.error("Rollback failed: " + e.getMessage());
             }
         }
 

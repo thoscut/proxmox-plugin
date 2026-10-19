@@ -168,8 +168,8 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
                 taskStatus = pve.waitForTaskToFinish(datacenterNode, taskId);
                 taskListener.getLogger().println("Task finished! Status object: " + taskStatus.toString());
             }
-        } catch (LoginException e) {
-            taskListener.getLogger().println("ERROR: Login failed: " + e.getMessage());
+        } catch (LoginException | IOException e) {
+            taskListener.getLogger().println("ERROR: Proxmox request failed: " + e.getMessage());
         }
     }
 
@@ -199,8 +199,8 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
                 startSlaveIfNeeded(taskListener);
             }
 
-        } catch (LoginException e) {
-            taskListener.getLogger().println("ERROR: Login failed: " + e.getMessage());
+        } catch (LoginException | IOException e) {
+            taskListener.getLogger().println("ERROR: Proxmox request failed: " + e.getMessage());
         }
 
         // Ignore the wait period for a JNLP agent as it connects back to the Jenkins instance.
@@ -250,8 +250,8 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
             taskListener.getLogger().println("Task finished! Status object: " + taskStatus.toString());
         } catch (InterruptedException e) {
             LOGGER.log(Level.SEVERE, "Waiting for task completion failed: " + e.getMessage());
-        } catch (LoginException e) {
-            LOGGER.log(Level.WARNING, "Login failed: " + e.getMessage());
+        } catch (LoginException | IOException e) {
+            LOGGER.log(Level.WARNING, "Proxmox request failed: " + e.getMessage());
         }
     }
 

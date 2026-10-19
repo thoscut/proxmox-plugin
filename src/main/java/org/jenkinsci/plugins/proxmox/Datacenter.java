@@ -8,11 +8,12 @@ import hudson.slaves.Cloud;
 import hudson.slaves.NodeProvisioner;
 import hudson.util.FormValidation;
 import hudson.util.Secret;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.security.auth.login.LoginException;
@@ -94,24 +95,31 @@ public class Datacenter extends Cloud {
     }
 
     public List<String> getNodes() {
-        Connector pveConnector = proxmoxInstance();
         try {
-            return pveConnector.getNodes();
-        } catch (LoginException e) {
+            return proxmoxInstance().getNodes();
+        } catch (LoginException | IOException | IllegalArgumentException e) {
+            LOGGER.log(Level.WARNING, "Failed to list nodes of Proxmox datacenter " + getDatacenterDescription(), e);
             return new ArrayList<String>();
         }
     }
 
-    public HashMap<String, Integer> getQemuMachines(String node) {
+    /**
+     * @return the virtual machines of the node, mapped from VM id to VM name.
+     */
+    public Map<Integer, String> getQemuMachines(String node) {
         if (node == null || node.isEmpty()) {
-            return new HashMap<String, Integer>();
+            return Collections.emptyMap();
         }
 
-        Connector pveConnector = proxmoxInstance();
         try {
-            return pveConnector.getQemuMachines(node);
-        } catch (LoginException e) {
-            return new HashMap<String, Integer>();
+            return proxmoxInstance().getQemuMachines(node);
+        } catch (LoginException | IOException | IllegalArgumentException e) {
+            LOGGER.log(
+                    Level.WARNING,
+                    "Failed to list virtual machines of node " + node + " in Proxmox datacenter "
+                            + getDatacenterDescription(),
+                    e);
+            return Collections.emptyMap();
         }
     }
 
@@ -120,10 +128,14 @@ public class Datacenter extends Cloud {
             return new ArrayList<String>();
         }
 
-        Connector pveConnector = proxmoxInstance();
         try {
-            return pveConnector.getQemuMachineSnapshots(node, vmid);
-        } catch (LoginException e) {
+            return proxmoxInstance().getQemuMachineSnapshots(node, vmid);
+        } catch (LoginException | IOException | IllegalArgumentException e) {
+            LOGGER.log(
+                    Level.WARNING,
+                    "Failed to list snapshots of virtual machine " + vmid + " in Proxmox datacenter "
+                            + getDatacenterDescription(),
+                    e);
             return new ArrayList<String>();
         }
     }
@@ -193,9 +205,12 @@ public class Datacenter extends Cloud {
                 }
 
             } catch (LoginException e) {
-                LOGGER.log(Level.SEVERE, "Authentication error", e);
+                LOGGER.log(Level.WARNING, "Authentication error", e);
                 return FormValidation.error(
                         "Authentication error. Please verify your login credentials or check logs.");
+            } catch (IOException | IllegalArgumentException e) {
+                LOGGER.log(Level.WARNING, "Connection test failed", e);
+                return FormValidation.error("Connection failed: " + e.getMessage());
             }
         }
     }
