@@ -3,6 +3,8 @@ package org.jenkinsci.plugins.proxmox.pve2api;
 import hudson.util.Secret;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -210,6 +212,25 @@ public class Connector implements AutoCloseable {
         }
     }
 
+    /**
+     * Encodes a value as a single URL path segment, so that it cannot change the API endpoint.
+     *
+     * @throws IllegalArgumentException if the value is empty.
+     */
+    static String encode(String pathSegment) {
+        if (pathSegment == null || pathSegment.isEmpty()) {
+            throw new IllegalArgumentException("Empty path segment in Proxmox API request");
+        }
+        return URLEncoder.encode(pathSegment, StandardCharsets.UTF_8).replace("+", "%20");
+    }
+
+    static String vmid(Integer vmid) {
+        if (vmid == null || vmid < 1) {
+            throw new IllegalArgumentException("Invalid virtual machine id: " + vmid);
+        }
+        return vmid.toString();
+    }
+
     public List<String> getNodes() throws LoginException, ProxmoxException {
         List<String> res = new ArrayList<String>();
         String apiUrl = "nodes";
@@ -221,12 +242,12 @@ public class Connector implements AutoCloseable {
     }
 
     public JSONObject getTaskStatus(String node, String taskId) throws LoginException, ProxmoxException {
-        String apiUrl = "nodes/" + node + "/tasks/" + taskId + "/status";
+        String apiUrl = "nodes/" + encode(node) + "/tasks/" + encode(taskId) + "/status";
         return getDataObject(getJSONResource(apiUrl), apiUrl);
     }
 
     public JSONObject getQemuMachineStatus(String node, Integer vmid) throws LoginException, ProxmoxException {
-        String apiUrl = "nodes/" + node + "/qemu/" + vmid + "/status/current";
+        String apiUrl = "nodes/" + encode(node) + "/qemu/" + vmid(vmid) + "/status/current";
         return getDataObject(getJSONResource(apiUrl), apiUrl);
     }
 
@@ -273,7 +294,7 @@ public class Connector implements AutoCloseable {
      */
     public Map<Integer, String> getQemuMachines(String node) throws LoginException, ProxmoxException {
         Map<Integer, String> res = new TreeMap<Integer, String>();
-        String apiUrl = "nodes/" + node + "/qemu";
+        String apiUrl = "nodes/" + encode(node) + "/qemu";
         JSONArray qemuVMs = getDataArray(getJSONResource(apiUrl), apiUrl);
         for (int i = 0; i < qemuVMs.length(); i++) {
             JSONObject vm = qemuVMs.getJSONObject(i);
@@ -284,7 +305,7 @@ public class Connector implements AutoCloseable {
 
     public List<String> getQemuMachineSnapshots(String node, Integer vmid) throws LoginException, ProxmoxException {
         List<String> res = new ArrayList<String>();
-        String apiUrl = "nodes/" + node + "/qemu/" + vmid + "/snapshot";
+        String apiUrl = "nodes/" + encode(node) + "/qemu/" + vmid(vmid) + "/snapshot";
         JSONArray snapshots = getDataArray(getJSONResource(apiUrl), apiUrl);
         for (int i = 0; i < snapshots.length(); i++) {
             res.add(snapshots.getJSONObject(i).getString("name"));
@@ -294,22 +315,23 @@ public class Connector implements AutoCloseable {
 
     public String rollbackQemuMachineSnapshot(String node, Integer vmid, String snapshotName)
             throws LoginException, ProxmoxException {
-        String apiUrl = "nodes/" + node + "/qemu/" + vmid + "/snapshot/" + snapshotName + "/rollback";
+        String apiUrl = "nodes/" + encode(node) + "/qemu/" + vmid(vmid) + "/snapshot/" + encode(snapshotName)
+                + "/rollback";
         return getDataString(postJSONResource(apiUrl), apiUrl);
     }
 
     public String startQemuMachine(String node, Integer vmid) throws LoginException, ProxmoxException {
-        String apiUrl = "nodes/" + node + "/qemu/" + vmid + "/status/start";
+        String apiUrl = "nodes/" + encode(node) + "/qemu/" + vmid(vmid) + "/status/start";
         return getDataString(postJSONResource(apiUrl), apiUrl);
     }
 
     public String stopQemuMachine(String node, Integer vmid) throws LoginException, ProxmoxException {
-        String apiUrl = "nodes/" + node + "/qemu/" + vmid + "/status/stop";
+        String apiUrl = "nodes/" + encode(node) + "/qemu/" + vmid(vmid) + "/status/stop";
         return getDataString(postJSONResource(apiUrl), apiUrl);
     }
 
     public String shutdownQemuMachine(String node, Integer vmid) throws LoginException, ProxmoxException {
-        String apiUrl = "nodes/" + node + "/qemu/" + vmid + "/status/shutdown";
+        String apiUrl = "nodes/" + encode(node) + "/qemu/" + vmid(vmid) + "/status/shutdown";
         return getDataString(postJSONResource(apiUrl), apiUrl);
     }
 
