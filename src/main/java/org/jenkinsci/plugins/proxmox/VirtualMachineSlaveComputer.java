@@ -35,7 +35,8 @@ public class VirtualMachineSlaveComputer extends SlaveComputer {
 
         final Node node = getNode();
 
-        if (node instanceof VirtualMachineSlave) {
+        if (node instanceof VirtualMachineSlave
+                && ((VirtualMachineSlave) node).getLauncher() instanceof VirtualMachineLauncher) {
             final VirtualMachineSlave slave = (VirtualMachineSlave) node;
             final VirtualMachineLauncher launcher = (VirtualMachineLauncher) slave.getLauncher();
 
@@ -54,8 +55,11 @@ public class VirtualMachineSlaveComputer extends SlaveComputer {
 
                     launcher.launch(this, getListener());
                     getListener().getLogger().println("INFO: agent launched");
-                } catch (IOException | InterruptedException e) {
+                } catch (IOException e) {
                     getListener().getLogger().println("ERROR: Snapshot revert failed: " + e.getMessage());
+                } catch (InterruptedException e) {
+                    getListener().getLogger().println("ERROR: Snapshot revert was interrupted");
+                    Thread.currentThread().interrupt();
                 } catch (ExecutionException e) {
                     getListener()
                             .getLogger()

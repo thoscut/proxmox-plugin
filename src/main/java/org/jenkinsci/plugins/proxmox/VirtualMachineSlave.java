@@ -14,7 +14,6 @@ import hudson.slaves.RetentionStrategy;
 import hudson.util.FormValidation;
 import hudson.util.ListBoxModel;
 import java.io.IOException;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import javax.security.auth.login.LoginException;
@@ -22,6 +21,7 @@ import jenkins.model.Jenkins;
 import org.jenkinsci.plugins.proxmox.VirtualMachineLauncher.RevertPolicy;
 import org.jenkinsci.plugins.proxmox.pve2api.Connector;
 import org.kohsuke.stapler.DataBoundConstructor;
+import org.kohsuke.stapler.DataBoundSetter;
 import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.verb.POST;
 
@@ -81,6 +81,25 @@ public class VirtualMachineSlave extends Slave {
         this.startVM = startVM;
         this.startupWaitingPeriodSeconds = startupWaitingPeriodSeconds;
         this.revertPolicy = revertPolicy;
+        checkConfigurePermission();
+    }
+
+    /**
+     * Binding an agent to a virtual machine lets Jenkins control that machine with the credentials of the
+     * datacenter, so it requires the same permission as configuring the datacenter. The agent configuration
+     * may also be submitted as XML (config.xml), so the check is repeated when it is deserialized.
+     */
+    private static void checkConfigurePermission() {
+        Jenkins jenkins = Jenkins.getInstanceOrNull();
+        if (jenkins != null) {
+            jenkins.checkPermission(Jenkins.ADMINISTER);
+        }
+    }
+
+    @Override
+    protected Object readResolve() {
+        checkConfigurePermission();
+        return super.readResolve();
     }
 
     public String getDatacenterDescription() {
@@ -112,7 +131,30 @@ public class VirtualMachineSlave extends Slave {
     }
 
     public ComputerLauncher getDelegateLauncher() {
-        return ((VirtualMachineLauncher) getLauncher()).getLauncher();
+        ComputerLauncher launcher = getLauncher();
+        return launcher instanceof VirtualMachineLauncher ? ((VirtualMachineLauncher) launcher).getLauncher() : launcher;
+    }
+
+    /**
+     * Keeps the {@link VirtualMachineLauncher} wrapper when the launcher is replaced, e.g. by Configuration as
+     * Code ({@code launcher: jnlp}); otherwise the virtual machine would never be started or reverted.
+     */
+    @Override
+    @DataBoundSetter
+    public void setLauncher(ComputerLauncher launcher) {
+        if (launcher == null || launcher instanceof VirtualMachineLauncher) {
+            super.setLauncher(launcher);
+        } else {
+            super.setLauncher(new VirtualMachineLauncher(
+                    launcher,
+                    datacenterDescription,
+                    datacenterNode,
+                    virtualMachineId,
+                    snapshotName,
+                    startVM,
+                    startupWaitingPeriodSeconds,
+                    revertPolicy));
+        }
     }
 
     @Override
@@ -182,9 +224,9 @@ public class VirtualMachineSlave extends Slave {
             items.add("[Select]", "");
             Datacenter datacenter = getDatacenterByDescription(datacenterDescription);
             if (datacenter != null) {
-                HashMap<String, Integer> machines = datacenter.getQemuMachines(datacenterNode);
-                for (Map.Entry<String, Integer> me : machines.entrySet()) {
-                    items.add(me.getKey().toString(), me.getValue().toString());
+                for (Map.Entry<Integer, String> vm :
+                        datacenter.getQemuMachines(datacenterNode).entrySet()) {
+                    items.add(vm.getValue() + " (" + vm.getKey() + ")", vm.getKey().toString());
                 }
             }
             return items;
@@ -244,12 +286,17 @@ public class VirtualMachineSlave extends Slave {
             Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             Datacenter datacenter = getDatacenterByDescription(datacenterDescription);
             if (datacenter == null) return FormValidation.error("Datacenter not found!");
-            Connector pveApi = datacenter.proxmoxInstance();
+            if (snapshotName == null || snapshotName.isEmpty() || "current".equals(snapshotName)) {
+                return FormValidation.ok("No snapshot selected, nothing to roll back");
+            }
             try {
+                Connector pveApi = datacenter.proxmoxInstance();
                 String taskStatus = pveApi.rollbackQemuMachineSnapshot(datacenterNode, virtualMachineId, snapshotName);
                 return FormValidation.ok("Returned: " + taskStatus);
             } catch (LoginException e) {
                 return FormValidation.error("Login Failed: " + e.getMessage());
+            } catch (IOException | IllegalArgumentException e) {
+                return FormValidation.error("Rollback failed: " + e.getMessage());
             }
         }
 

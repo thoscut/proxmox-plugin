@@ -12,32 +12,41 @@ Use Proxmox virtual machines as agents in Jenkins
 
 This plugin allows the use of Proxmox virtual machines as agents in Jenkins.
 
+> **Note:** This repository is an unofficial fork of
+> [jenkinsci/proxmox-plugin](https://github.com/jenkinsci/proxmox-plugin). Its builds are named
+> `proxmox_unofficial.hpi` and are not distributed through the Jenkins update center.
+
 ## Limitations
 
 -   Only Qemu virtual machines supported (at the moment).
--   No option to avoid rolling back to a snapshot on agent start up.
--   No checking on virtual machine ready state/errors during rollback.
+-   No checking on virtual machine ready state after a rollback or start; the "Startup Idle" period is waited instead.
 
 ## Configuration
 
 #### Datacenter cloud
 
 To add a new Proxmox datacenter cloud, click on "Manage Jenkins" then
-"Configure System". In the "Cloud" section click "Add cloud" and select
-"Datacenter".
+"Clouds" and "New cloud", and select "Proxmox Datacenter".
+The hostname may include a port (`host:port`, default 8006).
 
 #### Virtual machine agents
 
-To add agents click on "Manage Jenkins" then "Manage Nodes". Select the
+To add agents click on "Manage Jenkins" then "Nodes". Select the
 node type "Agent virtual machine running on a Proxmox datacenter." and
-enter a name for the node.
+enter a name for the node. Configuring these agents requires the
+Overall/Administer permission, because they control virtual machines with
+the datacenter's credentials.
+
+-   **Revert Snapshot**: the snapshot to roll back to. Select `current` to never roll back.
+-   **Revert policy**: roll back after connecting the agent, or before every job.
+-   If the rollback or start of the virtual machine fails, the agent launch is aborted.
 
 ## Manually Installing
  1. Clone this repo.
  2. Run ``mvn clean package``. 
  3. Go to Jenkins in a web browser.
- 4. Click on *"Manage Jenkins"*, select *"Manage Plugins"*. 
- 5. Click on the *"Advanced"* tab then upload the file `target/proxmox.hpi` under the *"Upload Plugin"* section.
+ 4. Click on *"Manage Jenkins"*, select *"Plugins"*. 
+ 5. Click on *"Advanced settings"* then upload the file `target/proxmox.hpi` under the *"Deploy Plugin"* section.
  
 To run directly a Jenkins test instance with the plugin, run ``mvn hpi:run``.
 

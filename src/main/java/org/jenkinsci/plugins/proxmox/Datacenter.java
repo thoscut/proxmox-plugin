@@ -8,11 +8,13 @@ import hudson.slaves.Cloud;
 import hudson.slaves.NodeProvisioner;
 import hudson.util.FormValidation;
 import hudson.util.Secret;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.security.auth.login.LoginException;
@@ -36,7 +38,22 @@ public class Datacenter extends Cloud {
     private final String realm;
     private final Secret password;
     private final Boolean ignoreSSL;
-    private transient Connector pveConnector;
+
+    /**
+     * API connectors by datacenter description. Saving the configuration replaces the {@link Datacenter}
+     * instance, so connectors are kept here to be reused or closed instead of leaking their HTTP client.
+     */
+    private static final Map<String, CachedConnector> CONNECTORS = new ConcurrentHashMap<>();
+
+    private static final class CachedConnector {
+        private final String settingsDigest;
+        private final Connector connector;
+
+        private CachedConnector(String settingsDigest, Connector connector) {
+            this.settingsDigest = settingsDigest;
+            this.connector = connector;
+        }
+    }
 
     @DataBoundConstructor
     public Datacenter(String hostname, String username, String realm, Secret password, Boolean ignoreSSL) {
@@ -46,7 +63,6 @@ public class Datacenter extends Cloud {
         this.realm = realm;
         this.password = password;
         this.ignoreSSL = ignoreSSL;
-        this.pveConnector = null;
     }
 
     public Collection<NodeProvisioner.PlannedNode> provision(Label label, int excessWorkload) {
@@ -87,31 +103,49 @@ public class Datacenter extends Cloud {
     }
 
     public Connector proxmoxInstance() {
-        if (pveConnector == null) {
-            pveConnector = new Connector(hostname, username, realm, password, ignoreSSL);
-        }
-        return pveConnector;
+        // Validate before replacing a cached connector, so an invalid hostname does not leave a closed one behind
+        Connector.buildBaseURL(hostname);
+        String settingsDigest = Util.getDigestOf(String.join(
+                "\n", hostname, username, realm, Secret.toString(password), String.valueOf(ignoreSSL)));
+        return CONNECTORS.compute(getDatacenterDescription(), (description, cached) -> {
+                    if (cached != null) {
+                        if (cached.settingsDigest.equals(settingsDigest)) {
+                            return cached;
+                        }
+                        cached.connector.close();
+                    }
+                    return new CachedConnector(
+                            settingsDigest, new Connector(hostname, username, realm, password, ignoreSSL));
+                })
+                .connector;
     }
 
     public List<String> getNodes() {
-        Connector pveConnector = proxmoxInstance();
         try {
-            return pveConnector.getNodes();
-        } catch (LoginException e) {
+            return proxmoxInstance().getNodes();
+        } catch (LoginException | IOException | IllegalArgumentException e) {
+            LOGGER.log(Level.WARNING, "Failed to list nodes of Proxmox datacenter " + getDatacenterDescription(), e);
             return new ArrayList<String>();
         }
     }
 
-    public HashMap<String, Integer> getQemuMachines(String node) {
+    /**
+     * @return the virtual machines of the node, mapped from VM id to VM name.
+     */
+    public Map<Integer, String> getQemuMachines(String node) {
         if (node == null || node.isEmpty()) {
-            return new HashMap<String, Integer>();
+            return Collections.emptyMap();
         }
 
-        Connector pveConnector = proxmoxInstance();
         try {
-            return pveConnector.getQemuMachines(node);
-        } catch (LoginException e) {
-            return new HashMap<String, Integer>();
+            return proxmoxInstance().getQemuMachines(node);
+        } catch (LoginException | IOException | IllegalArgumentException e) {
+            LOGGER.log(
+                    Level.WARNING,
+                    "Failed to list virtual machines of node " + node + " in Proxmox datacenter "
+                            + getDatacenterDescription(),
+                    e);
+            return Collections.emptyMap();
         }
     }
 
@@ -120,10 +154,14 @@ public class Datacenter extends Cloud {
             return new ArrayList<String>();
         }
 
-        Connector pveConnector = proxmoxInstance();
         try {
-            return pveConnector.getQemuMachineSnapshots(node, vmid);
-        } catch (LoginException e) {
+            return proxmoxInstance().getQemuMachineSnapshots(node, vmid);
+        } catch (LoginException | IOException | IllegalArgumentException e) {
+            LOGGER.log(
+                    Level.WARNING,
+                    "Failed to list snapshots of virtual machine " + vmid + " in Proxmox datacenter "
+                            + getDatacenterDescription(),
+                    e);
             return new ArrayList<String>();
         }
     }
@@ -161,8 +199,9 @@ public class Datacenter extends Cloud {
             return emptyStringValidation("Realm", value);
         }
 
+        @POST
         public FormValidation doCheckPassword(@QueryParameter Secret value) {
-            return emptyStringValidation("Password", value.getPlainText());
+            return emptyStringValidation("Password", Secret.toString(value));
         }
 
         @POST
@@ -174,16 +213,16 @@ public class Datacenter extends Cloud {
                 @QueryParameter Boolean ignoreSSL) {
             Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             try {
-                if (hostname.isEmpty()) {
+                if (Util.fixEmptyAndTrim(hostname) == null) {
                     return fieldNotSpecifiedError("Hostname");
                 }
-                if (username.isEmpty()) {
+                if (Util.fixEmptyAndTrim(username) == null) {
                     return fieldNotSpecifiedError("Username");
                 }
-                if (realm.isEmpty()) {
+                if (Util.fixEmptyAndTrim(realm) == null) {
                     return fieldNotSpecifiedError("Realm");
                 }
-                if (password.getPlainText().isEmpty()) {
+                if (Secret.toString(password).isEmpty()) {
                     return fieldNotSpecifiedError("Password");
                 }
 
@@ -193,9 +232,12 @@ public class Datacenter extends Cloud {
                 }
 
             } catch (LoginException e) {
-                LOGGER.log(Level.SEVERE, "Authentication error", e);
+                LOGGER.log(Level.WARNING, "Authentication error", e);
                 return FormValidation.error(
                         "Authentication error. Please verify your login credentials or check logs.");
+            } catch (IOException | IllegalArgumentException e) {
+                LOGGER.log(Level.WARNING, "Connection test failed", e);
+                return FormValidation.error("Connection failed: " + e.getMessage());
             }
         }
     }

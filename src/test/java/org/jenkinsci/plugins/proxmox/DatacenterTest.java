@@ -5,7 +5,7 @@ import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.is;
 
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Map;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -18,14 +18,14 @@ class DatacenterTest {
     @Test
     void getQemuMachines_returns_empty_for_null_node() {
         Datacenter dc = new Datacenter("host", "user", "pve", null, false);
-        HashMap<String, Integer> result = dc.getQemuMachines(null);
+        Map<Integer, String> result = dc.getQemuMachines(null);
         assertThat(result.isEmpty(), is(true));
     }
 
     @Test
     void getQemuMachines_returns_empty_for_empty_node() {
         Datacenter dc = new Datacenter("host", "user", "pve", null, false);
-        HashMap<String, Integer> result = dc.getQemuMachines("");
+        Map<Integer, String> result = dc.getQemuMachines("");
         assertThat(result.isEmpty(), is(true));
     }
 
