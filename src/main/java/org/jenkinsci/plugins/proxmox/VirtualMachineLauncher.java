@@ -1,6 +1,5 @@
 package org.jenkinsci.plugins.proxmox;
 
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import hudson.AbortException;
 import hudson.model.Descriptor;
 import hudson.model.TaskListener;
@@ -28,16 +27,10 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
 
     /** Launcher of configurations saved by older versions, migrated in {@link #readResolve()}. */
     @Deprecated
-    @SuppressFBWarnings(
-            value = {"UWF_UNWRITTEN_FIELD", "NP_UNWRITTEN_FIELD"},
-            justification = "Set by XStream when loading old configurations")
     private ComputerLauncher delegate;
 
     /** Startup wait period of configurations saved by older versions, migrated in {@link #readResolve()}. */
     @Deprecated
-    @SuppressFBWarnings(
-            value = {"UWF_UNWRITTEN_FIELD", "NP_UNWRITTEN_FIELD"},
-            justification = "Set by XStream when loading old configurations")
     private Integer WAIT_TIME_MS;
 
     private String datacenterDescription;
