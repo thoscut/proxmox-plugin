@@ -63,10 +63,6 @@
       <version>3.14.5</version>
     </dependency>
     <dependency>
-        <groupId>io.jenkins.plugins</groupId>
-        <artifactId>json-api</artifactId>
-    </dependency>
-    <dependency>
       <groupId>io.jenkins</groupId>
       <artifactId>configuration-as-code</artifactId>
       <scope>test</scope>
