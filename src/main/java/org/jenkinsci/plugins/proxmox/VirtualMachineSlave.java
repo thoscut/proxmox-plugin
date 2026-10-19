@@ -286,8 +286,11 @@ public class VirtualMachineSlave extends Slave {
             Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             Datacenter datacenter = getDatacenterByDescription(datacenterDescription);
             if (datacenter == null) return FormValidation.error("Datacenter not found!");
-            Connector pveApi = datacenter.proxmoxInstance();
+            if (snapshotName == null || snapshotName.isEmpty() || "current".equals(snapshotName)) {
+                return FormValidation.ok("No snapshot selected, nothing to roll back");
+            }
             try {
+                Connector pveApi = datacenter.proxmoxInstance();
                 String taskStatus = pveApi.rollbackQemuMachineSnapshot(datacenterNode, virtualMachineId, snapshotName);
                 return FormValidation.ok("Returned: " + taskStatus);
             } catch (LoginException e) {
