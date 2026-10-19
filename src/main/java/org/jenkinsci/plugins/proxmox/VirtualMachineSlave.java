@@ -21,6 +21,7 @@ import jenkins.model.Jenkins;
 import org.jenkinsci.plugins.proxmox.VirtualMachineLauncher.RevertPolicy;
 import org.jenkinsci.plugins.proxmox.pve2api.Connector;
 import org.kohsuke.stapler.DataBoundConstructor;
+import org.kohsuke.stapler.DataBoundSetter;
 import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.verb.POST;
 
@@ -111,7 +112,30 @@ public class VirtualMachineSlave extends Slave {
     }
 
     public ComputerLauncher getDelegateLauncher() {
-        return ((VirtualMachineLauncher) getLauncher()).getLauncher();
+        ComputerLauncher launcher = getLauncher();
+        return launcher instanceof VirtualMachineLauncher ? ((VirtualMachineLauncher) launcher).getLauncher() : launcher;
+    }
+
+    /**
+     * Keeps the {@link VirtualMachineLauncher} wrapper when the launcher is replaced, e.g. by Configuration as
+     * Code ({@code launcher: jnlp}); otherwise the virtual machine would never be started or reverted.
+     */
+    @Override
+    @DataBoundSetter
+    public void setLauncher(ComputerLauncher launcher) {
+        if (launcher == null || launcher instanceof VirtualMachineLauncher) {
+            super.setLauncher(launcher);
+        } else {
+            super.setLauncher(new VirtualMachineLauncher(
+                    launcher,
+                    datacenterDescription,
+                    datacenterNode,
+                    virtualMachineId,
+                    snapshotName,
+                    startVM,
+                    startupWaitingPeriodSeconds,
+                    revertPolicy));
+        }
     }
 
     @Override

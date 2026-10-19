@@ -35,7 +35,8 @@ public class VirtualMachineSlaveComputer extends SlaveComputer {
 
         final Node node = getNode();
 
-        if (node instanceof VirtualMachineSlave) {
+        if (node instanceof VirtualMachineSlave
+                && ((VirtualMachineSlave) node).getLauncher() instanceof VirtualMachineLauncher) {
             final VirtualMachineSlave slave = (VirtualMachineSlave) node;
             final VirtualMachineLauncher launcher = (VirtualMachineLauncher) slave.getLauncher();
 

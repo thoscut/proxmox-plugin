@@ -23,6 +23,7 @@ import io.jenkins.plugins.casc.model.Mapping;
 import java.util.Arrays;
 import java.util.List;
 import org.jenkinsci.plugins.proxmox.Datacenter;
+import org.jenkinsci.plugins.proxmox.VirtualMachineLauncher;
 import org.jenkinsci.plugins.proxmox.VirtualMachineLauncher.RevertPolicy;
 import org.jenkinsci.plugins.proxmox.VirtualMachineSlave;
 import org.jenkinsci.plugins.proxmox.VirtualMachineSlaveComputer;
@@ -47,7 +48,15 @@ class ConfigurationAsCodeTest {
         assertThat(computers.get(1).getNode(), instanceOf(VirtualMachineSlave.class));
 
         VirtualMachineSlave slave = (VirtualMachineSlave) computers.get(1).getNode();
-        assertThat(slave.getLauncher(), instanceOf(JNLPLauncher.class));
+        assertThat(slave.getLauncher(), instanceOf(VirtualMachineLauncher.class));
+        assertThat(slave.getDelegateLauncher(), instanceOf(JNLPLauncher.class));
+        VirtualMachineLauncher launcher = (VirtualMachineLauncher) slave.getLauncher();
+        assertThat(launcher.getDatacenterDescription(), is(cloud.getDatacenterDescription()));
+        assertThat(launcher.getDatacenterNode(), is("proxmox-node"));
+        assertThat(launcher.getVirtualMachineId(), is(42));
+        assertThat(launcher.getSnapshotName(), is("proxmox-snapshot"));
+        assertThat(launcher.getRevertPolicy(), is(RevertPolicy.BEFORE_JOB));
+        assertThat(launcher.getWaitingTimeSecs(), is(60));
         assertThat(slave.getRetentionStrategy(), instanceOf(RetentionStrategy.Demand.class));
         assertThat(slave.getDatacenterDescription(), is(cloud.getDatacenterDescription()));
         assertThat(slave.getDatacenterNode(), is("proxmox-node"));
