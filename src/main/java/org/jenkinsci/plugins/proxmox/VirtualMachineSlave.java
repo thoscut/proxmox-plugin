@@ -173,6 +173,7 @@ public class VirtualMachineSlave extends Slave {
             }
         }
 
+        @POST
         public ListBoxModel doFillDatacenterDescriptionItems(@AncestorInPath Computer computer) {
             checkConfigurePermission(computer);
             ListBoxModel items = new ListBoxModel();
@@ -188,6 +189,7 @@ public class VirtualMachineSlave extends Slave {
             return items;
         }
 
+        @POST
         public ListBoxModel doFillDatacenterNodeItems(
                 @AncestorInPath Computer computer,
                 @QueryParameter("datacenterDescription") String datacenterDescription) {
@@ -203,6 +205,7 @@ public class VirtualMachineSlave extends Slave {
             return items;
         }
 
+        @POST
         public ListBoxModel doFillVirtualMachineIdItems(
                 @AncestorInPath Computer computer,
                 @QueryParameter("datacenterDescription") String datacenterDescription,
@@ -220,6 +223,7 @@ public class VirtualMachineSlave extends Slave {
             return items;
         }
 
+        @POST
         public ListBoxModel doFillSnapshotNameItems(
                 @AncestorInPath Computer computer,
                 @QueryParameter("datacenterDescription") String datacenterDescription,
