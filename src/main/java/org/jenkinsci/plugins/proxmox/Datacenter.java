@@ -260,7 +260,9 @@ public class Datacenter extends Cloud {
             return emptyStringValidation("Hostname", value);
         }
 
+        @POST
         public FormValidation doCheckUsername(@QueryParameter String value, @QueryParameter String credentialsId) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             if (Util.fixEmptyAndTrim(credentialsId) != null) {
                 return FormValidation.ok();
             }
@@ -271,13 +273,16 @@ public class Datacenter extends Cloud {
             return emptyStringValidation("Realm", value);
         }
 
+        @POST
         public FormValidation doCheckPassword(@QueryParameter Secret value, @QueryParameter String credentialsId) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             if (Util.fixEmptyAndTrim(credentialsId) != null) {
                 return FormValidation.ok();
             }
             return emptyStringValidation("Password", value == null ? null : value.getPlainText());
         }
 
+        @POST
         public FormValidation doCheckCredentialsId(@QueryParameter String value) {
             Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             if (Util.fixEmptyAndTrim(value) == null) {
@@ -292,6 +297,7 @@ public class Datacenter extends Cloud {
             }
         }
 
+        @POST
         public ListBoxModel doFillCredentialsIdItems(@QueryParameter String credentialsId) {
             Jenkins jenkins = Jenkins.get();
             StandardListBoxModel result = new StandardListBoxModel();
