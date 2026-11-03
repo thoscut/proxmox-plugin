@@ -109,4 +109,24 @@ class ConfigurationAsCodeTest {
         assertThat(exported, containsString("virtualMachineLauncher:"));
         assertThat(exported, containsString("snapshotName: \"proxmox-snapshot\""));
     }
+
+    @Test
+    @ConfiguredWithCode("configuration-as-code-token.yml")
+    void should_support_api_token_credentials(JenkinsConfiguredWithCodeRule r) throws Exception {
+        Datacenter cloud = (Datacenter) r.jenkins.clouds.get(0);
+        assertThat(cloud.getCredentialsId(), is("proxmox-token"));
+        assertThat(cloud.name, is("proxmox-company-proxmox-proxmox-token"));
+        // The description agents refer to is derived from the token's user@realm.
+        assertThat(cloud.getDatacenterDescription(), is("jenkins@pve - company-proxmox"));
+
+        VirtualMachineSlave slave = (VirtualMachineSlave) r.jenkins.getNode("proxmox-vm");
+        VirtualMachineLauncher launcher = (VirtualMachineLauncher) slave.getLauncher();
+        assertThat(launcher.findDatacenterInstance(), is(cloud));
+
+        ConfiguratorRegistry registry = ConfiguratorRegistry.get();
+        ConfigurationContext context = new ConfigurationContext(registry);
+        String exported = toYamlString(getJenkinsRoot(context).get("clouds"));
+        assertThat(exported, containsString("credentialsId: \"proxmox-token\""));
+        assertThat(exported, not(containsString("password")));
+    }
 }

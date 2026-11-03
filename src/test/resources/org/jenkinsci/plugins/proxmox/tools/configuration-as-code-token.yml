@@ -1,0 +1,29 @@
+credentials:
+  system:
+    domainCredentials:
+      - credentials:
+          - string:
+              scope: SYSTEM
+              id: "proxmox-token"
+              description: "Proxmox API token"
+              secret: "jenkins@pve!ci=11111111-2222-3333-4444-555555555555"
+jenkins:
+  clouds:
+    - datacenter:
+        hostname: "company-proxmox"
+        credentialsId: "proxmox-token"
+  nodes:
+    - virtualMachineSlave:
+        datacenterDescription: "jenkins@pve - company-proxmox"
+        datacenterNode: "proxmox-node"
+        launcher:
+          jnlp
+        name: "proxmox-vm"
+        numExecutors: 1
+        remoteFS: "/home/jenkins"
+        retentionStrategy: "always"
+        revertPolicy: AFTER_CONNECT
+        snapshotName: "clean"
+        startVM: true
+        startupWaitingPeriodSeconds: 30
+        virtualMachineId: 100

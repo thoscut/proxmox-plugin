@@ -39,9 +39,7 @@ public class Connector implements AutoCloseable {
     // Proxmox tickets are valid for 2 hours; renew a bit earlier to avoid races with the expiry.
     static final long TICKET_LIFETIME_MS = 110 * 60 * 1000;
 
-    private final String username;
-    private final String realm;
-    private final Secret password;
+    private final ProxmoxAuth auth;
     final String baseURL;
 
     private volatile Ticket ticket;
@@ -68,6 +66,10 @@ public class Connector implements AutoCloseable {
     }
 
     public Connector(String hostname, String username, String realm, Secret password, Boolean ignoreSSL) {
+        this(hostname, ProxmoxAuth.usernamePassword(username, realm, password), ignoreSSL);
+    }
+
+    public Connector(String hostname, ProxmoxAuth auth, Boolean ignoreSSL) {
         int port = DEFAULT_PORT;
         String host = normalizeHost(hostname);
         try {
@@ -81,9 +83,7 @@ public class Connector implements AutoCloseable {
         } catch (URISyntaxException e) {
             LOGGER.log(Level.WARNING, "Failed to parse hostname URI: " + hostname, e);
         }
-        this.username = username;
-        this.realm = realm;
-        this.password = password;
+        this.auth = auth;
 
         this.unirest = Unirest.spawnInstance();
         unirest.config()
@@ -186,12 +186,40 @@ public class Connector implements AutoCloseable {
         this.taskTimeoutMs = taskTimeoutMs;
     }
 
+    public ProxmoxAuth getAuth() {
+        return auth;
+    }
+
+    private boolean usesApiToken() {
+        return auth instanceof ProxmoxAuth.ApiToken;
+    }
+
+    /**
+     * Verifies the credentials. With a username and password this obtains an authentication
+     * ticket; an API token needs no login, so it is checked with a request to {@code version}.
+     */
     public synchronized void login() throws LoginException {
+        if (auth == null) {
+            throw new LoginException("No Proxmox credentials configured");
+        }
+        if (usesApiToken()) {
+            ProxmoxAuth.ApiToken token = (ProxmoxAuth.ApiToken) auth;
+            if (!token.isValidFormat()) {
+                throw new LoginException("The API token must have the form user@realm!tokenid=secret");
+            }
+            try {
+                getJSONResource("version");
+            } catch (ProxmoxException e) {
+                throw loginException("API token was rejected: " + e.getMessage(), e);
+            }
+            return;
+        }
+        ProxmoxAuth.UsernamePassword credentials = (ProxmoxAuth.UsernamePassword) auth;
         HttpResponse<JsonNode> response;
         try {
             response = unirest.post(baseURL + "access/ticket")
-                    .field("username", username + "@" + realm)
-                    .field("password", password == null ? "" : password.getPlainText())
+                    .field("username", credentials.getUserAtRealm())
+                    .field("password", credentials.getPlainPassword())
                     .asJson();
         } catch (UnirestException e) {
             LOGGER.log(Level.WARNING, "Could not connect to Proxmox at " + baseURL, e);
@@ -217,6 +245,9 @@ public class Connector implements AutoCloseable {
     }
 
     public synchronized void checkIfAuthTicketIsValid() throws LoginException {
+        if (usesApiToken()) {
+            return;
+        }
         Ticket current = ticket;
         if (current == null || System.currentTimeMillis() - current.issuedAtMs >= TICKET_LIFETIME_MS) {
             login();
@@ -239,7 +270,7 @@ public class Connector implements AutoCloseable {
             throws LoginException, ProxmoxException {
         Ticket t = validTicket();
         HttpResponse<JsonNode> response = send(requestFactory, t);
-        if (response.getStatus() == 401) {
+        if (response.getStatus() == 401 && !usesApiToken()) {
             // The ticket was revoked or expired early, so log in once more and retry.
             invalidate(t);
             response = send(requestFactory, validTicket());
@@ -258,8 +289,12 @@ public class Connector implements AutoCloseable {
     private HttpResponse<JsonNode> send(Supplier<HttpRequest<?>> requestFactory, Ticket t) throws ProxmoxException {
         try {
             HttpRequest<?> request = requestFactory.get();
-            request.header("Cookie", "PVEAuthCookie=" + t.authTicket);
-            request.header("CSRFPreventionToken", t.csrfPreventionToken);
+            if (usesApiToken()) {
+                request.header("Authorization", ((ProxmoxAuth.ApiToken) auth).getAuthorizationHeader());
+            } else {
+                request.header("Cookie", "PVEAuthCookie=" + t.authTicket);
+                request.header("CSRFPreventionToken", t.csrfPreventionToken);
+            }
             return request.asJson();
         } catch (UnirestException e) {
             throw new ProxmoxException("Could not reach Proxmox at " + baseURL + ": " + e.getMessage(), e);
