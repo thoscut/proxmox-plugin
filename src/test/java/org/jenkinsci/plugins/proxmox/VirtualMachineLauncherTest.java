@@ -44,4 +44,11 @@ class VirtualMachineLauncherTest {
         assertThat(RevertPolicy.AFTER_CONNECT.getLabel(), is("After connect to the virtual machine"));
         assertThat(RevertPolicy.BEFORE_JOB.getLabel(), is("Before every job executing on the virtual machine"));
     }
+
+    @Test
+    void negative_waiting_time_is_clamped() {
+        VirtualMachineLauncher launcher =
+                new VirtualMachineLauncher(null, "dc", "node", 100, "snap", true, -5, RevertPolicy.AFTER_CONNECT);
+        assertThat(launcher.getWaitingTimeSecs(), is(0));
+    }
 }

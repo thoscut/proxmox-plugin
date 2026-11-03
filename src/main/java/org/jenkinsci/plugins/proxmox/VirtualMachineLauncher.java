@@ -70,7 +70,7 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
         this.virtualMachineId = virtualMachineId;
         this.snapshotName = snapshotName;
         this.startVM = startVM;
-        this.waitingTimeSecs = waitingTimeSecs;
+        this.waitingTimeSecs = Math.max(0, waitingTimeSecs);
         this.revertPolicy = revertPolicy;
     }
 
@@ -135,12 +135,28 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
         if (datacenterDescription != null && virtualMachineId != null) {
             for (Cloud cloud : Jenkins.get().clouds) {
                 if (cloud instanceof Datacenter
-                        && ((Datacenter) cloud).getDatacenterDescription().equals(datacenterDescription)) {
+                        && datacenterDescription.equals(((Datacenter) cloud).getDatacenterDescription())) {
                     return (Datacenter) cloud;
                 }
             }
         }
-        throw new RuntimeException("Could not find the proxmox datacenter instance!");
+        throw new IllegalStateException("Could not find the proxmox datacenter instance '" + datacenterDescription
+                + "' for virtual machine " + virtualMachineId + "!");
+    }
+
+    private Connector connector() throws IOException {
+        try {
+            return findDatacenterInstance().proxmoxInstance();
+        } catch (IllegalStateException e) {
+            throw new IOException(e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Legacy configurations, which were created before the revert policy existed, always reverted after connect.
+     */
+    private RevertPolicy effectiveRevertPolicy() {
+        return revertPolicy == null ? RevertPolicy.AFTER_CONNECT : revertPolicy;
     }
 
     @Override
@@ -155,64 +171,72 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
         return overrideLaunchSupported;
     }
 
-    public void startSlaveIfNeeded(TaskListener taskListener) throws InterruptedException {
-        String taskId = null;
-        JSONObject taskStatus = null;
-        try {
-            Datacenter datacenter = findDatacenterInstance();
-            Connector pve = datacenter.proxmoxInstance();
-            Boolean isvmIdRunning = pve.isQemuMachineRunning(datacenterNode, virtualMachineId);
-            if (!isvmIdRunning) {
-                taskListener.getLogger().println("Starting virtual machine...");
-                taskId = pve.startQemuMachine(datacenterNode, virtualMachineId);
-                taskStatus = pve.waitForTaskToFinish(datacenterNode, taskId);
-                taskListener.getLogger().println("Task finished! Status object: " + taskStatus.toString());
-            }
-        } catch (LoginException e) {
-            taskListener.getLogger().println("ERROR: Login failed: " + e.getMessage());
+    private static String describe(JSONObject taskStatus) {
+        if (taskStatus == null) {
+            return "no status";
+        }
+        return "status=" + taskStatus.optString("status") + ", exitstatus=" + taskStatus.optString("exitstatus");
+    }
+
+    /**
+     * Waits for a Proxmox task and fails if it did not finish successfully.
+     */
+    private void awaitTask(Connector pve, String taskId, String action, TaskListener taskListener)
+            throws IOException, InterruptedException, LoginException {
+        JSONObject taskStatus = pve.waitForTaskToFinish(datacenterNode, taskId);
+        taskListener.getLogger().println("Task finished! Status object: " + taskStatus);
+        if (!Connector.isTaskSuccessful(taskStatus)) {
+            throw new IOException(
+                    "Proxmox task to " + action + " virtual machine " + virtualMachineId + " failed ("
+                            + describe(taskStatus) + ")");
         }
     }
 
-    public void revertSnapshot(SlaveComputer slaveComputer, TaskListener taskListener) throws InterruptedException {
-        String taskId = null;
-        JSONObject taskStatus = null;
-
+    public void startSlaveIfNeeded(TaskListener taskListener) throws IOException, InterruptedException {
         try {
-            Datacenter datacenter = findDatacenterInstance();
-            Connector pve = datacenter.proxmoxInstance();
+            Connector pve = connector();
+            if (!pve.isQemuMachineRunning(datacenterNode, virtualMachineId)) {
+                taskListener.getLogger().println("Starting virtual machine...");
+                String taskId = pve.startQemuMachine(datacenterNode, virtualMachineId);
+                awaitTask(pve, taskId, "start", taskListener);
+            }
+        } catch (LoginException e) {
+            throw new IOException("Login to Proxmox failed: " + e.getMessage(), e);
+        }
+    }
 
-            if (!"current".equals(snapshotName)) {
+    public void revertSnapshot(SlaveComputer slaveComputer, TaskListener taskListener)
+            throws IOException, InterruptedException {
+        try {
+            Connector pve = connector();
+
+            if (snapshotName != null && !snapshotName.isEmpty() && !"current".equals(snapshotName)) {
                 taskListener
                         .getLogger()
                         .println("Virtual machine \"" + virtualMachineId + "\" (Name \""
                                 + slaveComputer.getDisplayName() + "\") is being reverted...");
-                // TODO: Check the status of this task (pass/fail) not just that its finished
-                taskId = pve.rollbackQemuMachineSnapshot(datacenterNode, virtualMachineId, snapshotName);
+                String taskId = pve.rollbackQemuMachineSnapshot(datacenterNode, virtualMachineId, snapshotName);
                 taskListener.getLogger().println("Proxmox returned: " + taskId);
-
-                // Wait for the task to finish
-                taskStatus = pve.waitForTaskToFinish(datacenterNode, taskId);
-                taskListener.getLogger().println("Task finished! Status object: " + taskStatus.toString());
+                awaitTask(pve, taskId, "roll back", taskListener);
             }
-
-            if (Boolean.TRUE.equals(startVM)) {
-                startSlaveIfNeeded(taskListener);
-            }
-
         } catch (LoginException e) {
-            taskListener.getLogger().println("ERROR: Login failed: " + e.getMessage());
+            throw new IOException("Login to Proxmox failed: " + e.getMessage(), e);
+        }
+
+        if (Boolean.TRUE.equals(startVM)) {
+            startSlaveIfNeeded(taskListener);
         }
 
         // Ignore the wait period for a JNLP agent as it connects back to the Jenkins instance.
-        if (!(launcher instanceof JNLPLauncher)) {
-            Thread.sleep((long) waitingTimeSecs * 1000);
+        if (!(launcher instanceof JNLPLauncher) && waitingTimeSecs > 0) {
+            Thread.sleep(waitingTimeSecs * 1000L);
         }
     }
 
     @Override
     public void launch(SlaveComputer slaveComputer, TaskListener taskListener)
             throws IOException, InterruptedException {
-        if (revertPolicy == RevertPolicy.AFTER_CONNECT) {
+        if (effectiveRevertPolicy() == RevertPolicy.AFTER_CONNECT) {
             revertSnapshot(slaveComputer, taskListener);
         } else {
             if (Boolean.TRUE.equals(startVM)) {
@@ -224,40 +248,58 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
     }
 
     public void shutdown(SlaveComputer slaveComputer, TaskListener taskListener) {
-        String taskId = null;
-        JSONObject taskStatus = null;
+        taskListener
+                .getLogger()
+                .println("Virtual machine \"" + virtualMachineId + "\" (slave \"" + slaveComputer.getDisplayName()
+                        + "\") is being shutdown.");
+        Connector pve;
+        try {
+            pve = connector();
+        } catch (IOException e) {
+            taskListener.getLogger().println("ERROR: " + e.getMessage());
+            LOGGER.log(Level.WARNING, "Could not shut down virtual machine " + virtualMachineId, e);
+            return;
+        }
 
         // try to gracefully shutdown the virtual machine
         try {
-            taskListener
-                    .getLogger()
-                    .println("Virtual machine \"" + virtualMachineId + "\" (slave \"" + slaveComputer.getDisplayName()
-                            + "\") is being shutdown.");
-            Datacenter datacenter = findDatacenterInstance();
-            Connector pve = datacenter.proxmoxInstance();
-            taskId = pve.shutdownQemuMachine(datacenterNode, virtualMachineId);
-            taskStatus = pve.waitForTaskToFinish(datacenterNode, taskId);
-            if (!taskStatus.has("exitstatus") || !taskStatus.getString("exitstatus").equals("OK")) {
-                // Graceful shutdown failed, so doing a stop.
-                taskListener
-                        .getLogger()
-                        .println("Virtual machine \"" + virtualMachineId + "\" (slave \""
-                                + slaveComputer.getDisplayName()
-                                + "\") was not able to shutdown, doing a stop instead");
-                taskId = pve.stopQemuMachine(datacenterNode, virtualMachineId);
-                taskStatus = pve.waitForTaskToFinish(datacenterNode, taskId);
+            String taskId = pve.shutdownQemuMachine(datacenterNode, virtualMachineId);
+            JSONObject taskStatus = pve.waitForTaskToFinish(datacenterNode, taskId);
+            if (Connector.isTaskSuccessful(taskStatus)) {
+                taskListener.getLogger().println("Task finished! Status object: " + taskStatus);
+                return;
             }
-            taskListener.getLogger().println("Task finished! Status object: " + taskStatus.toString());
+            taskListener.getLogger().println("Graceful shutdown failed (" + describe(taskStatus) + ")");
         } catch (InterruptedException e) {
-            LOGGER.log(Level.SEVERE, "Waiting for task completion failed: " + e.getMessage());
-        } catch (LoginException e) {
-            LOGGER.log(Level.WARNING, "Login failed: " + e.getMessage());
+            Thread.currentThread().interrupt();
+            LOGGER.log(Level.WARNING, "Interrupted while shutting down virtual machine " + virtualMachineId, e);
+            return;
+        } catch (LoginException | IOException e) {
+            taskListener.getLogger().println("Graceful shutdown failed: " + e.getMessage());
+            LOGGER.log(Level.WARNING, "Graceful shutdown of virtual machine " + virtualMachineId + " failed", e);
+        }
+
+        // Graceful shutdown failed, so doing a stop.
+        taskListener
+                .getLogger()
+                .println("Virtual machine \"" + virtualMachineId + "\" (slave \"" + slaveComputer.getDisplayName()
+                        + "\") was not able to shutdown, doing a stop instead");
+        try {
+            String taskId = pve.stopQemuMachine(datacenterNode, virtualMachineId);
+            JSONObject taskStatus = pve.waitForTaskToFinish(datacenterNode, taskId);
+            taskListener.getLogger().println("Task finished! Status object: " + taskStatus);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            LOGGER.log(Level.WARNING, "Interrupted while stopping virtual machine " + virtualMachineId, e);
+        } catch (LoginException | IOException e) {
+            taskListener.getLogger().println("ERROR: Stopping the virtual machine failed: " + e.getMessage());
+            LOGGER.log(Level.WARNING, "Stopping virtual machine " + virtualMachineId + " failed", e);
         }
     }
 
     @Override
     public void beforeDisconnect(SlaveComputer slaveComputer, TaskListener taskListener) {
-        if (revertPolicy == RevertPolicy.AFTER_CONNECT) shutdown(slaveComputer, taskListener);
+        if (effectiveRevertPolicy() == RevertPolicy.AFTER_CONNECT) shutdown(slaveComputer, taskListener);
 
         super.beforeDisconnect(slaveComputer, taskListener);
     }

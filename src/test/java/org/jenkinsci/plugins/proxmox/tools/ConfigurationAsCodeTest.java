@@ -23,6 +23,7 @@ import io.jenkins.plugins.casc.model.Mapping;
 import java.util.Arrays;
 import java.util.List;
 import org.jenkinsci.plugins.proxmox.Datacenter;
+import org.jenkinsci.plugins.proxmox.VirtualMachineLauncher;
 import org.jenkinsci.plugins.proxmox.VirtualMachineLauncher.RevertPolicy;
 import org.jenkinsci.plugins.proxmox.VirtualMachineSlave;
 import org.jenkinsci.plugins.proxmox.VirtualMachineSlaveComputer;
@@ -40,6 +41,7 @@ class ConfigurationAsCodeTest {
         assertThat(cloud.getUsername(), is("proxmox-user"));
         assertThat(cloud.getPassword(), hasPlainText("proxmox-pass"));
         assertThat(cloud.getIgnoreSSL(), is(true));
+        assertThat(cloud.name, is("proxmox-company-proxmox-proxmox-user-pve"));
 
         List<Computer> computers = Arrays.asList(r.jenkins.getComputers());
         assertThat(computers, hasSize(2));
@@ -47,7 +49,13 @@ class ConfigurationAsCodeTest {
         assertThat(computers.get(1).getNode(), instanceOf(VirtualMachineSlave.class));
 
         VirtualMachineSlave slave = (VirtualMachineSlave) computers.get(1).getNode();
-        assertThat(slave.getLauncher(), instanceOf(JNLPLauncher.class));
+        // The configured launcher is wrapped, so the virtual machine is still reverted/started.
+        assertThat(slave.getLauncher(), instanceOf(VirtualMachineLauncher.class));
+        assertThat(slave.getDelegateLauncher(), instanceOf(JNLPLauncher.class));
+        VirtualMachineLauncher launcher = (VirtualMachineLauncher) slave.getLauncher();
+        assertThat(launcher.getVirtualMachineId(), is(42));
+        assertThat(launcher.getSnapshotName(), is("proxmox-snapshot"));
+        assertThat(launcher.getRevertPolicy(), is(RevertPolicy.BEFORE_JOB));
         assertThat(slave.getRetentionStrategy(), instanceOf(RetentionStrategy.Demand.class));
         assertThat(slave.getDatacenterDescription(), is(cloud.getDatacenterDescription()));
         assertThat(slave.getDatacenterNode(), is("proxmox-node"));

@@ -4,6 +4,7 @@ import static java.util.Collections.emptyList;
 import static java.util.Optional.ofNullable;
 
 import hudson.Extension;
+import hudson.Util;
 import hudson.model.Computer;
 import hudson.model.Descriptor;
 import hudson.model.Slave;
@@ -14,14 +15,14 @@ import hudson.slaves.RetentionStrategy;
 import hudson.util.FormValidation;
 import hudson.util.ListBoxModel;
 import java.io.IOException;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import javax.security.auth.login.LoginException;
 import jenkins.model.Jenkins;
 import org.jenkinsci.plugins.proxmox.VirtualMachineLauncher.RevertPolicy;
-import org.jenkinsci.plugins.proxmox.pve2api.Connector;
+import org.kohsuke.stapler.AncestorInPath;
 import org.kohsuke.stapler.DataBoundConstructor;
+import org.kohsuke.stapler.DataBoundSetter;
 import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.verb.POST;
 
@@ -112,7 +113,32 @@ public class VirtualMachineSlave extends Slave {
     }
 
     public ComputerLauncher getDelegateLauncher() {
-        return ((VirtualMachineLauncher) getLauncher()).getLauncher();
+        ComputerLauncher launcher = getLauncher();
+        if (launcher instanceof VirtualMachineLauncher) {
+            return ((VirtualMachineLauncher) launcher).getLauncher();
+        }
+        return launcher;
+    }
+
+    /**
+     * Configuration as Code sets the {@code launcher} attribute after construction. Wrap it,
+     * so the Proxmox handling (revert, start and shutdown of the virtual machine) is kept.
+     */
+    @Override
+    @DataBoundSetter
+    public void setLauncher(ComputerLauncher launcher) {
+        if (launcher != null && !(launcher instanceof VirtualMachineLauncher)) {
+            launcher = new VirtualMachineLauncher(
+                    launcher,
+                    datacenterDescription,
+                    datacenterNode,
+                    virtualMachineId,
+                    snapshotName,
+                    startVM,
+                    startupWaitingPeriodSeconds,
+                    revertPolicy);
+        }
+        super.setLauncher(launcher);
     }
 
     @Override
@@ -125,17 +151,7 @@ public class VirtualMachineSlave extends Slave {
     @Extension
     public static final class DescriptorImpl extends SlaveDescriptor {
 
-        private String datacenterDescription;
-        private String datacenterNode;
-        private Integer virtualMachineId;
-        private String snapshotName;
-        private Boolean startVM;
-        private RevertPolicy revertPolicy;
-
-        public DescriptorImpl() {
-            load();
-        }
-
+        @Override
         public String getDisplayName() {
             return "Agent virtual machine running on a Proxmox datacenter.";
         }
@@ -145,8 +161,20 @@ public class VirtualMachineSlave extends Slave {
             return true;
         }
 
-        public ListBoxModel doFillDatacenterDescriptionItems() {
-            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+        /**
+         * Agents can be configured by users with {@link Computer#CONFIGURE} (existing agent)
+         * or {@link Computer#CREATE} (new agent), not only by administrators.
+         */
+        private static void checkConfigurePermission(Computer computer) {
+            if (computer != null) {
+                computer.checkPermission(Computer.CONFIGURE);
+            } else {
+                Jenkins.get().checkPermission(Computer.CREATE);
+            }
+        }
+
+        public ListBoxModel doFillDatacenterDescriptionItems(@AncestorInPath Computer computer) {
+            checkConfigurePermission(computer);
             ListBoxModel items = new ListBoxModel();
             items.add("[Select]", "");
             for (Cloud cloud : Jenkins.get().clouds) {
@@ -161,8 +189,9 @@ public class VirtualMachineSlave extends Slave {
         }
 
         public ListBoxModel doFillDatacenterNodeItems(
+                @AncestorInPath Computer computer,
                 @QueryParameter("datacenterDescription") String datacenterDescription) {
-            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+            checkConfigurePermission(computer);
             ListBoxModel items = new ListBoxModel();
             items.add("[Select]", "");
             Datacenter datacenter = getDatacenterByDescription(datacenterDescription);
@@ -175,26 +204,28 @@ public class VirtualMachineSlave extends Slave {
         }
 
         public ListBoxModel doFillVirtualMachineIdItems(
+                @AncestorInPath Computer computer,
                 @QueryParameter("datacenterDescription") String datacenterDescription,
                 @QueryParameter("datacenterNode") String datacenterNode) {
-            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+            checkConfigurePermission(computer);
             ListBoxModel items = new ListBoxModel();
             items.add("[Select]", "");
             Datacenter datacenter = getDatacenterByDescription(datacenterDescription);
             if (datacenter != null) {
-                HashMap<String, Integer> machines = datacenter.getQemuMachines(datacenterNode);
-                for (Map.Entry<String, Integer> me : machines.entrySet()) {
-                    items.add(me.getKey().toString(), me.getValue().toString());
+                Map<Integer, String> machines = datacenter.getQemuMachines(datacenterNode);
+                for (Map.Entry<Integer, String> me : machines.entrySet()) {
+                    items.add(me.getValue() + " (" + me.getKey() + ")", me.getKey().toString());
                 }
             }
             return items;
         }
 
         public ListBoxModel doFillSnapshotNameItems(
+                @AncestorInPath Computer computer,
                 @QueryParameter("datacenterDescription") String datacenterDescription,
                 @QueryParameter("datacenterNode") String datacenterNode,
                 @QueryParameter("virtualMachineId") String virtualMachineId) {
-            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+            checkConfigurePermission(computer);
             ListBoxModel items = new ListBoxModel();
             items.add("[Select]", "");
             Datacenter datacenter = getDatacenterByDescription(datacenterDescription);
@@ -211,45 +242,42 @@ public class VirtualMachineSlave extends Slave {
             return items;
         }
 
-        public String getDatacenterDescription() {
-            return datacenterDescription;
-        }
-
-        public String getDatacenterNode() {
-            return datacenterNode;
-        }
-
-        public Integer getVirtualMachineId() {
-            return virtualMachineId;
-        }
-
-        public String getSnapshotName() {
-            return snapshotName;
-        }
-
-        public Boolean getStartVM() {
-            return startVM;
-        }
-
-        public RevertPolicy getRevertPolicy() {
-            return revertPolicy;
-        }
-
+        /**
+         * Checks that the selected snapshot exists. This deliberately does not roll back the
+         * virtual machine, because that would destroy the state of a possibly running agent.
+         */
         @POST
         public FormValidation doTestRollback(
+                @AncestorInPath Computer computer,
                 @QueryParameter String datacenterDescription,
                 @QueryParameter String datacenterNode,
-                @QueryParameter Integer virtualMachineId,
+                @QueryParameter String virtualMachineId,
                 @QueryParameter String snapshotName) {
-            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+            checkConfigurePermission(computer);
             Datacenter datacenter = getDatacenterByDescription(datacenterDescription);
             if (datacenter == null) return FormValidation.error("Datacenter not found!");
-            Connector pveApi = datacenter.proxmoxInstance();
+            if (Util.fixEmptyAndTrim(datacenterNode) == null) return FormValidation.error("No node selected");
+            int vmid;
             try {
-                String taskStatus = pveApi.rollbackQemuMachineSnapshot(datacenterNode, virtualMachineId, snapshotName);
-                return FormValidation.ok("Returned: " + taskStatus);
+                vmid = Integer.parseInt(Util.fixNull(virtualMachineId).trim());
+            } catch (NumberFormatException e) {
+                return FormValidation.error("No virtual machine selected");
+            }
+            if (Util.fixEmptyAndTrim(snapshotName) == null) return FormValidation.error("No snapshot selected");
+            if ("current".equals(snapshotName)) {
+                return FormValidation.ok("'current' is selected, so the virtual machine will not be reverted");
+            }
+            try {
+                List<String> snapshots = datacenter.proxmoxInstance().getQemuMachineSnapshots(datacenterNode, vmid);
+                if (snapshots.contains(snapshotName)) {
+                    return FormValidation.ok("Snapshot '" + snapshotName + "' exists and can be rolled back to");
+                }
+                return FormValidation.error(
+                        "Snapshot '" + snapshotName + "' does not exist on virtual machine " + vmid);
             } catch (LoginException e) {
                 return FormValidation.error("Login Failed: " + e.getMessage());
+            } catch (IOException | RuntimeException e) {
+                return FormValidation.error("Request failed: " + e.getMessage());
             }
         }
 
@@ -257,7 +285,7 @@ public class VirtualMachineSlave extends Slave {
             if (datacenterDescription != null && !datacenterDescription.equals("")) {
                 for (Cloud cloud : Jenkins.get().clouds) {
                     if (cloud instanceof Datacenter
-                            && ((Datacenter) cloud).getDatacenterDescription().equals(datacenterDescription)) {
+                            && datacenterDescription.equals(((Datacenter) cloud).getDatacenterDescription())) {
                         return (Datacenter) cloud;
                     }
                 }
