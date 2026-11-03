@@ -4,8 +4,10 @@ import static io.jenkins.plugins.casc.misc.Util.getJenkinsRoot;
 import static io.jenkins.plugins.casc.misc.Util.toYamlString;
 import static java.util.Objects.requireNonNull;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.instanceOf;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.core.Is.is;
 import static org.jvnet.hudson.test.JenkinsMatchers.hasPlainText;
 
@@ -94,5 +96,17 @@ class ConfigurationAsCodeTest {
                 "");
 
         assertThat(exported, is(expected));
+    }
+
+    @Test
+    @ConfiguredWithCode("configuration-as-code.yml")
+    void should_export_nodes_with_the_wrapped_launcher(JenkinsConfiguredWithCodeRule r) throws Exception {
+        ConfiguratorRegistry registry = ConfiguratorRegistry.get();
+        ConfigurationContext context = new ConfigurationContext(registry);
+        String exported = toYamlString(getJenkinsRoot(context).get("nodes"));
+
+        assertThat(exported, not(containsString("FAILED TO EXPORT")));
+        assertThat(exported, containsString("virtualMachineLauncher:"));
+        assertThat(exported, containsString("snapshotName: \"proxmox-snapshot\""));
     }
 }

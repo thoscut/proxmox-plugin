@@ -41,7 +41,11 @@ class ConnectorTest {
         "https://pve.example.com:8006/, https://pve.example.com:8006/api2/json/",
         "' pve.example.com ', https://pve.example.com:8006/api2/json/",
         "10.0.0.1, https://10.0.0.1:8006/api2/json/",
-        "'[::1]:8007', 'https://[::1]:8007/api2/json/'"
+        "'[::1]:8007', 'https://[::1]:8007/api2/json/'",
+        "https://pve.example.com:8006/api2/json, https://pve.example.com:8006/api2/json/",
+        "http://pve.example.com, https://pve.example.com:8006/api2/json/",
+        "pve.example.com/, https://pve.example.com:8006/api2/json/",
+        "pve_1, https://pve_1:8006/api2/json/"
     })
     void base_url_is_built_from_hostname(String hostname, String expected) {
         try (Connector connector = new Connector(hostname, "user", "pve", null, false)) {
@@ -66,6 +70,31 @@ class ConnectorTest {
     void path_segments_cannot_change_the_endpoint() throws ProxmoxException {
         assertThat(Connector.encodePathSegment("pve/qemu/999/status/stop?"), is("pve%2Fqemu%2F999%2Fstatus%2Fstop%3F"));
         assertThat(Connector.encodePathSegment("a#b c%"), is("a%23b%20c%25"));
+        assertThat(Connector.encodePathSegment("snap \u00fc+"), is("snap%20%C3%BC%2B"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"pve/qemu/999/status/stop?", "pve node", "-pve", "", "pve%2Fx"})
+    void invalid_node_names_are_rejected(String node) {
+        try (Connector connector = new Connector("localhost", "user", "pve", null, false)) {
+            assertThrows(ProxmoxException.class, () -> connector.startQemuMachine(node, 100));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"1snap", "snap/../x", "snap name", "snap.1", ""})
+    void invalid_snapshot_names_are_rejected(String snapshot) {
+        try (Connector connector = new Connector("localhost", "user", "pve", null, false)) {
+            assertThrows(ProxmoxException.class, () -> connector.rollbackQemuMachineSnapshot("pve", 100, snapshot));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"not-a-upid", "UPID:pve/x", "UPID:pve:00001234 x", ""})
+    void invalid_task_ids_are_rejected(String taskId) {
+        try (Connector connector = new Connector("localhost", "user", "pve", null, false)) {
+            assertThrows(ProxmoxException.class, () -> connector.getTaskStatus("pve", taskId));
+        }
     }
 
     @ParameterizedTest

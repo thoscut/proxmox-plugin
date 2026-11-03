@@ -23,6 +23,10 @@ This plugin allows the use of Proxmox virtual machines as agents in Jenkins.
 
 #### Datacenter cloud
 
+Use a dedicated Proxmox user for Jenkins with the least privileges needed on the
+agent VMs (or their pool): `VM.Audit`, `VM.PowerMgmt` and `VM.Snapshot.Rollback`.
+Everyone who may configure Jenkins agents can select VMs and snapshots of that account.
+
 To add a new Proxmox datacenter cloud, go to "Manage Jenkins" > "Clouds",
 click "New cloud" and select "Proxmox Datacenter".
 

@@ -11,6 +11,7 @@ import java.util.TreeMap;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
 import javax.security.auth.login.LoginException;
 import kong.unirest.HttpRequest;
 import kong.unirest.HttpResponse;
@@ -38,11 +39,10 @@ public class Connector implements AutoCloseable {
     // Proxmox tickets are valid for 2 hours; renew a bit earlier to avoid races with the expiry.
     static final long TICKET_LIFETIME_MS = 110 * 60 * 1000;
 
-    protected Integer port;
-    protected String username;
-    protected String realm;
-    protected Secret password;
-    protected String baseURL;
+    private final String username;
+    private final String realm;
+    private final Secret password;
+    final String baseURL;
 
     private volatile Ticket ticket;
     private final UnirestInstance unirest;
@@ -68,7 +68,7 @@ public class Connector implements AutoCloseable {
     }
 
     public Connector(String hostname, String username, String realm, Secret password, Boolean ignoreSSL) {
-        this.port = DEFAULT_PORT;
+        int port = DEFAULT_PORT;
         String host = normalizeHost(hostname);
         try {
             URI uri = new URI("https://" + host);
@@ -114,9 +114,37 @@ public class Connector implements AutoCloseable {
         return host;
     }
 
+    // Proxmox's own syntax for node names, snapshot names and task ids (UPIDs).
+    private static final Pattern NODE_NAME = Pattern.compile("[A-Za-z0-9][A-Za-z0-9.-]*");
+    private static final Pattern SNAPSHOT_NAME = Pattern.compile("[A-Za-z][A-Za-z0-9_-]*");
+    private static final Pattern TASK_ID = Pattern.compile("UPID:[A-Za-z0-9:._@-]+");
+
+    private static String nodeSegment(String node) throws ProxmoxException {
+        if (node == null || !NODE_NAME.matcher(node).matches()) {
+            throw new ProxmoxException("Invalid Proxmox node name: '" + node + "'");
+        }
+        return node;
+    }
+
+    private static String snapshotSegment(String snapshotName) throws ProxmoxException {
+        if (snapshotName == null || !SNAPSHOT_NAME.matcher(snapshotName).matches()) {
+            throw new ProxmoxException("Invalid snapshot name: '" + snapshotName + "'");
+        }
+        return snapshotName;
+    }
+
+    private static String taskSegment(String taskId) throws ProxmoxException {
+        if (taskId == null || !TASK_ID.matcher(taskId).matches()) {
+            throw new ProxmoxException("Invalid Proxmox task id: '" + taskId + "'");
+        }
+        return taskId;
+    }
+
     /**
-     * Encodes a single path segment of an API URL, so user supplied values such as
-     * node or snapshot names cannot change the addressed API endpoint.
+     * Encodes a single path segment of an API URL. Values are additionally validated against
+     * Proxmox's own syntax (see {@link #nodeSegment}, {@link #snapshotSegment}, {@link #taskSegment}),
+     * because the server decodes the path before routing it, so an encoded slash would still
+     * act as a separator there.
      */
     static String encodePathSegment(String segment) throws ProxmoxException {
         if (segment == null || segment.isEmpty() || ".".equals(segment) || "..".equals(segment)) {
@@ -150,9 +178,10 @@ public class Connector implements AutoCloseable {
     }
 
     private static String qemuPath(String node, Integer vmid) throws ProxmoxException {
-        return "nodes/" + encodePathSegment(node) + "/qemu/" + vmidSegment(vmid);
+        return "nodes/" + nodeSegment(node) + "/qemu/" + vmidSegment(vmid);
     }
 
+    /** Only for tests, which cannot wait ten minutes for a task to time out. */
     void setTaskTimeoutMs(long taskTimeoutMs) {
         this.taskTimeoutMs = taskTimeoutMs;
     }
@@ -169,8 +198,7 @@ public class Connector implements AutoCloseable {
             throw loginException("Could not connect to " + baseURL + ": " + e.getMessage(), e);
         }
         if (!response.isSuccess()) {
-            throw new LoginException(
-                    "Login failed with HTTP " + response.getStatus() + " " + response.getStatusText());
+            throw new LoginException("Login failed with HTTP " + response.getStatus() + " " + response.getStatusText());
         }
         try {
             JSONObject data = response.getBody().getObject().getJSONObject("data");
@@ -195,19 +223,25 @@ public class Connector implements AutoCloseable {
         }
     }
 
-    private Ticket validTicket() throws LoginException {
+    private synchronized Ticket validTicket() throws LoginException {
         checkIfAuthTicketIsValid();
         return ticket;
     }
 
+    /** Drops the ticket that got rejected, unless another thread already renewed it. */
+    private synchronized void invalidate(Ticket stale) {
+        if (ticket == stale) {
+            ticket = null;
+        }
+    }
+
     private JsonNode execute(String apiUrl, Supplier<HttpRequest<?>> requestFactory)
             throws LoginException, ProxmoxException {
-        HttpResponse<JsonNode> response = send(requestFactory, validTicket());
+        Ticket t = validTicket();
+        HttpResponse<JsonNode> response = send(requestFactory, t);
         if (response.getStatus() == 401) {
             // The ticket was revoked or expired early, so log in once more and retry.
-            synchronized (this) {
-                ticket = null;
-            }
+            invalidate(t);
             response = send(requestFactory, validTicket());
         }
         if (!response.isSuccess()) {
@@ -279,7 +313,7 @@ public class Connector implements AutoCloseable {
     }
 
     public JSONObject getTaskStatus(String node, String taskId) throws LoginException, ProxmoxException {
-        String url = "nodes/" + encodePathSegment(node) + "/tasks/" + encodePathSegment(taskId) + "/status";
+        String url = "nodes/" + nodeSegment(node) + "/tasks/" + encodePathSegment(taskSegment(taskId)) + "/status";
         return dataObject(getJSONResource(url), url);
     }
 
@@ -329,7 +363,7 @@ public class Connector implements AutoCloseable {
      */
     public Map<Integer, String> getQemuMachines(String node) throws LoginException, ProxmoxException {
         Map<Integer, String> res = new TreeMap<>();
-        String url = "nodes/" + encodePathSegment(node) + "/qemu";
+        String url = "nodes/" + nodeSegment(node) + "/qemu";
         JSONArray qemuVMs = dataArray(getJSONResource(url), url);
         for (int i = 0; i < qemuVMs.length(); i++) {
             JSONObject vm = qemuVMs.getJSONObject(i);
@@ -357,7 +391,7 @@ public class Connector implements AutoCloseable {
 
     public String rollbackQemuMachineSnapshot(String node, Integer vmid, String snapshotName)
             throws LoginException, ProxmoxException {
-        String url = qemuPath(node, vmid) + "/snapshot/" + encodePathSegment(snapshotName) + "/rollback";
+        String url = qemuPath(node, vmid) + "/snapshot/" + snapshotSegment(snapshotName) + "/rollback";
         return dataString(postJSONResource(url, ""), url);
     }
 

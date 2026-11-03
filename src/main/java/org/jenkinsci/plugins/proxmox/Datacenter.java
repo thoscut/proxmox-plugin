@@ -103,7 +103,7 @@ public class Datacenter extends Cloud {
     public List<String> getNodes() {
         try {
             return proxmoxInstance().getNodes();
-        } catch (LoginException | ProxmoxException e) {
+        } catch (LoginException | ProxmoxException | RuntimeException e) {
             LOGGER.log(Level.WARNING, "Could not list nodes of " + getDatacenterDescription(), e);
             return new ArrayList<>();
         }
@@ -119,7 +119,7 @@ public class Datacenter extends Cloud {
 
         try {
             return proxmoxInstance().getQemuMachines(node);
-        } catch (LoginException | ProxmoxException e) {
+        } catch (LoginException | ProxmoxException | RuntimeException e) {
             LOGGER.log(Level.WARNING, "Could not list virtual machines of node " + node, e);
             return Collections.emptyMap();
         }
@@ -132,7 +132,7 @@ public class Datacenter extends Cloud {
 
         try {
             return proxmoxInstance().getQemuMachineSnapshots(node, vmid);
-        } catch (LoginException | ProxmoxException e) {
+        } catch (LoginException | ProxmoxException | RuntimeException e) {
             LOGGER.log(Level.WARNING, "Could not list snapshots of virtual machine " + vmid, e);
             return new ArrayList<>();
         }

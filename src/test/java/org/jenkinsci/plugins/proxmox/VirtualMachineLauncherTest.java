@@ -1,12 +1,17 @@
 package org.jenkinsci.plugins.proxmox;
 
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
+import hudson.slaves.ComputerLauncher;
+import hudson.slaves.JNLPLauncher;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import kong.unirest.json.JSONObject;
 import org.jenkinsci.plugins.proxmox.VirtualMachineLauncher.RevertPolicy;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -50,5 +55,45 @@ class VirtualMachineLauncherTest {
         VirtualMachineLauncher launcher =
                 new VirtualMachineLauncher(null, "dc", "node", 100, "snap", true, -5, RevertPolicy.AFTER_CONNECT);
         assertThat(launcher.getWaitingTimeSecs(), is(0));
+    }
+
+    @Test
+    void null_delegate_defaults_to_inbound_launcher() {
+        VirtualMachineLauncher launcher =
+                new VirtualMachineLauncher(null, "dc", "node", 100, "snap", true, 0, RevertPolicy.AFTER_CONNECT);
+        assertThat(launcher.getLauncher(), instanceOf(JNLPLauncher.class));
+        assertThat(launcher.isLaunchSupported(), is(true));
+    }
+
+    @Test
+    void legacy_configuration_is_migrated_on_read() throws Exception {
+        VirtualMachineLauncher legacy =
+                new VirtualMachineLauncher(null, "dc", "node", 100, "snap", true, 0, RevertPolicy.AFTER_CONNECT);
+        ComputerLauncher delegate = new JNLPLauncher();
+        setField(legacy, "delegate", delegate);
+        setField(legacy, "WAIT_TIME_MS", 30_000);
+
+        Method readResolve = VirtualMachineLauncher.class.getDeclaredMethod("readResolve");
+        readResolve.setAccessible(true);
+        VirtualMachineLauncher migrated = (VirtualMachineLauncher) readResolve.invoke(legacy);
+
+        assertThat(migrated.getLauncher(), is(delegate));
+        assertThat(migrated.getWaitingTimeSecs(), is(30));
+        assertThat(migrated.getVirtualMachineId(), is(100));
+        assertThat(migrated.getSnapshotName(), is("snap"));
+    }
+
+    @Test
+    void task_status_description_is_null_safe() {
+        assertThat(VirtualMachineLauncher.describe(null), is("no status"));
+        assertThat(
+                VirtualMachineLauncher.describe(new JSONObject("{\"status\":\"stopped\",\"exitstatus\":\"OK\"}")),
+                is("status=stopped, exitstatus=OK"));
+    }
+
+    private static void setField(Object target, String name, Object value) throws Exception {
+        Field field = target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        field.set(target, value);
     }
 }

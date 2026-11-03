@@ -1,6 +1,8 @@
 package org.jenkinsci.plugins.proxmox;
 
+import hudson.Extension;
 import hudson.model.Descriptor;
+import hudson.model.DescriptorVisibilityFilter;
 import hudson.model.TaskListener;
 import hudson.slaves.Cloud;
 import hudson.slaves.ComputerLauncher;
@@ -15,6 +17,7 @@ import javax.security.auth.login.LoginException;
 import jenkins.model.Jenkins;
 import kong.unirest.json.JSONObject;
 import org.jenkinsci.plugins.proxmox.pve2api.Connector;
+import org.jenkinsci.Symbol;
 import org.kohsuke.stapler.DataBoundConstructor;
 
 /**
@@ -64,7 +67,8 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
             Boolean startVM,
             int waitingTimeSecs,
             RevertPolicy revertPolicy) {
-        super(launcher);
+        // Configuration as Code may omit the delegate; an inbound agent is the safe default.
+        super(launcher == null ? new JNLPLauncher() : launcher);
         this.datacenterDescription = datacenterDescription;
         this.datacenterNode = datacenterNode;
         this.virtualMachineId = virtualMachineId;
@@ -131,7 +135,7 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
         return revertPolicy;
     }
 
-    public Datacenter findDatacenterInstance() throws RuntimeException {
+    public Datacenter findDatacenterInstance() {
         if (datacenterDescription != null && virtualMachineId != null) {
             for (Cloud cloud : Jenkins.get().clouds) {
                 if (cloud instanceof Datacenter
@@ -171,7 +175,7 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
         return overrideLaunchSupported;
     }
 
-    private static String describe(JSONObject taskStatus) {
+    static String describe(JSONObject taskStatus) {
         if (taskStatus == null) {
             return "no status";
         }
@@ -184,7 +188,7 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
     private void awaitTask(Connector pve, String taskId, String action, TaskListener taskListener)
             throws IOException, InterruptedException, LoginException {
         JSONObject taskStatus = pve.waitForTaskToFinish(datacenterNode, taskId);
-        taskListener.getLogger().println("Task finished! Status object: " + taskStatus);
+        taskListener.getLogger().println("Task finished (" + describe(taskStatus) + ")");
         if (!Connector.isTaskSuccessful(taskStatus)) {
             throw new IOException(
                     "Proxmox task to " + action + " virtual machine " + virtualMachineId + " failed ("
@@ -227,10 +231,34 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
             startSlaveIfNeeded(taskListener);
         }
 
-        // Ignore the wait period for a JNLP agent as it connects back to the Jenkins instance.
-        if (!(launcher instanceof JNLPLauncher) && waitingTimeSecs > 0) {
-            Thread.sleep(waitingTimeSecs * 1000L);
+        waitForVirtualMachine(slaveComputer, taskListener);
+    }
+
+    /**
+     * Gives the reverted or started virtual machine time to boot. An inbound (JNLP) agent connects
+     * back on its own, so for it the method returns as soon as the channel is up; without this wait
+     * Jenkins would treat the launch as failed and revert the machine again on every reconnect attempt.
+     */
+    private void waitForVirtualMachine(SlaveComputer slaveComputer, TaskListener taskListener)
+            throws InterruptedException {
+        if (waitingTimeSecs <= 0) {
+            return;
         }
+        if (!(launcher instanceof JNLPLauncher)) {
+            Thread.sleep(waitingTimeSecs * 1000L);
+            return;
+        }
+        long deadline = System.currentTimeMillis() + waitingTimeSecs * 1000L;
+        while (System.currentTimeMillis() < deadline) {
+            if (slaveComputer.getChannel() != null) {
+                taskListener.getLogger().println("Inbound agent connected.");
+                return;
+            }
+            Thread.sleep(Connector.WAIT_TIME_MS);
+        }
+        taskListener
+                .getLogger()
+                .println("Inbound agent did not connect within " + waitingTimeSecs + " seconds; waiting for it.");
     }
 
     @Override
@@ -266,7 +294,7 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
             String taskId = pve.shutdownQemuMachine(datacenterNode, virtualMachineId);
             JSONObject taskStatus = pve.waitForTaskToFinish(datacenterNode, taskId);
             if (Connector.isTaskSuccessful(taskStatus)) {
-                taskListener.getLogger().println("Task finished! Status object: " + taskStatus);
+                taskListener.getLogger().println("Task finished (" + describe(taskStatus) + ")");
                 return;
             }
             taskListener.getLogger().println("Graceful shutdown failed (" + describe(taskStatus) + ")");
@@ -287,7 +315,7 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
         try {
             String taskId = pve.stopQemuMachine(datacenterNode, virtualMachineId);
             JSONObject taskStatus = pve.waitForTaskToFinish(datacenterNode, taskId);
-            taskListener.getLogger().println("Task finished! Status object: " + taskStatus);
+            taskListener.getLogger().println("Task finished (" + describe(taskStatus) + ")");
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             LOGGER.log(Level.WARNING, "Interrupted while stopping virtual machine " + virtualMachineId, e);
@@ -306,6 +334,27 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
 
     @Override
     public Descriptor<ComputerLauncher> getDescriptor() {
-        throw new UnsupportedOperationException();
+        return Jenkins.get().getDescriptorOrDie(getClass());
+    }
+
+    /**
+     * Needed so Configuration as Code can describe (export) the launcher. {@link VirtualMachineSlave}
+     * always creates this launcher itself, so it is hidden from the "Launch method" lists.
+     */
+    @Extension
+    @Symbol("virtualMachineLauncher")
+    public static final class DescriptorImpl extends Descriptor<ComputerLauncher> {
+        @Override
+        public String getDisplayName() {
+            return "Proxmox virtual machine launcher";
+        }
+    }
+
+    @Extension
+    public static final class HideFromLaunchMethods extends DescriptorVisibilityFilter {
+        @Override
+        public boolean filter(Object context, Descriptor descriptor) {
+            return !(descriptor instanceof DescriptorImpl);
+        }
     }
 }

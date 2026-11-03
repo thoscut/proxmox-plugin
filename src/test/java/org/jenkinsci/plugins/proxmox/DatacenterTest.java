@@ -69,4 +69,9 @@ class DatacenterTest {
         assertThat(a.name, is("proxmox-pve1.example.com_8006-admin-pam"));
         assertThat(a.name.equals(b.name), is(false));
     }
+
+    @Test
+    void cloud_name_only_contains_url_safe_characters() {
+        assertThat(Datacenter.cloudName("a b", "c/d", "h@st:1"), is("proxmox-h_st_1-a_b-c_d"));
+    }
 }

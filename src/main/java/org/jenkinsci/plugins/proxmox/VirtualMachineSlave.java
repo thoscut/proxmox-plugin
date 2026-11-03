@@ -127,7 +127,7 @@ public class VirtualMachineSlave extends Slave {
     @Override
     @DataBoundSetter
     public void setLauncher(ComputerLauncher launcher) {
-        if (launcher != null && !(launcher instanceof VirtualMachineLauncher)) {
+        if (!(launcher instanceof VirtualMachineLauncher)) {
             launcher = new VirtualMachineLauncher(
                     launcher,
                     datacenterDescription,
@@ -251,7 +251,7 @@ public class VirtualMachineSlave extends Slave {
          * virtual machine, because that would destroy the state of a possibly running agent.
          */
         @POST
-        public FormValidation doTestRollback(
+        public FormValidation doVerifySnapshot(
                 @AncestorInPath Computer computer,
                 @QueryParameter String datacenterDescription,
                 @QueryParameter String datacenterNode,
