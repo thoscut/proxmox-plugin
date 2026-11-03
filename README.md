@@ -15,29 +15,60 @@ This plugin allows the use of Proxmox virtual machines as agents in Jenkins.
 ## Limitations
 
 -   Only Qemu virtual machines supported (at the moment).
--   No option to avoid rolling back to a snapshot on agent start up.
--   No checking on virtual machine ready state/errors during rollback.
+-   To never roll back the virtual machine, select the snapshot `current`.
+-   A failed rollback or start of the virtual machine aborts the agent launch (or the job,
+    with the revert policy "Before every job").
 
 ## Configuration
 
 #### Datacenter cloud
 
-To add a new Proxmox datacenter cloud, click on "Manage Jenkins" then
-"Configure System". In the "Cloud" section click "Add cloud" and select
-"Datacenter".
+Use a dedicated Proxmox user for Jenkins with the least privileges needed on the
+agent VMs (or their pool): `VM.Audit`, `VM.PowerMgmt` and `VM.Snapshot.Rollback`.
+Everyone who may configure Jenkins agents can select VMs and snapshots of that account.
+
+To add a new Proxmox datacenter cloud, go to "Manage Jenkins" > "Clouds",
+click "New cloud" and select "Proxmox Datacenter".
 
 #### Virtual machine agents
 
-To add agents click on "Manage Jenkins" then "Manage Nodes". Select the
+To add agents go to "Manage Jenkins" > "Nodes" and click "New Node". Select the
 node type "Agent virtual machine running on a Proxmox datacenter." and
 enter a name for the node.
+
+#### Configuration as Code
+
+```yaml
+jenkins:
+  clouds:
+    - datacenter:
+        hostname: "proxmox.example.com"
+        username: "jenkins"
+        realm: "pve"
+        password: "${PROXMOX_PASSWORD}"
+        ignoreSSL: false
+  nodes:
+    - virtualMachineSlave:
+        name: "proxmox-vm"
+        datacenterDescription: "jenkins@pve - proxmox.example.com"
+        datacenterNode: "pve1"
+        virtualMachineId: 100
+        snapshotName: "clean"
+        startVM: true
+        startupWaitingPeriodSeconds: 60
+        revertPolicy: AFTER_CONNECT
+        numExecutors: 1
+        remoteFS: "/home/jenkins"
+        launcher:
+          jnlp
+```
 
 ## Manually Installing
  1. Clone this repo.
  2. Run ``mvn clean package``. 
  3. Go to Jenkins in a web browser.
- 4. Click on *"Manage Jenkins"*, select *"Manage Plugins"*. 
- 5. Click on the *"Advanced"* tab then upload the file `target/proxmox.hpi` under the *"Upload Plugin"* section.
+ 4. Go to *"Manage Jenkins"* > *"Plugins"* > *"Advanced settings"*.
+ 5. Upload the file `target/proxmox.hpi` under the *"Deploy Plugin"* section.
  
 To run directly a Jenkins test instance with the plugin, run ``mvn hpi:run``.
 

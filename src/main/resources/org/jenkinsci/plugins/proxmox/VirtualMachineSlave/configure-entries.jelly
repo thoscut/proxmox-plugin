@@ -16,7 +16,7 @@
         <f:select fillDependsOn="datacenterDescription,datacenterNode,virtualMachineId" />
     </f:entry>
 
-    <f:validateButton title="${%Test Rollback}" progress="${%Testing...}" method="testRollback"
+    <f:validateButton title="${%Check Snapshot}" progress="${%Testing...}" method="verifySnapshot"
                       with="datacenterDescription,datacenterNode,virtualMachineId,snapshotName"/>
 
     <f:entry title="${%Start Virtual Machine}" field="startVM" help="/plugin/proxmox/help-vm-startVirtualMachine.html">

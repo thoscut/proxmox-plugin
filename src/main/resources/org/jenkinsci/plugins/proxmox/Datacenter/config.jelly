@@ -18,7 +18,7 @@
     </f:entry>
 
     <f:advanced>
-        <f:entry title="${%Ignore SSL certificates}" field="ignoreSSL">
+        <f:entry title="${%Ignore SSL certificates}" field="ignoreSSL" help="/plugin/proxmox/help-datacenter-ignoreSSL.html">
             <f:checkbox default="false" />
         </f:entry>
     </f:advanced>

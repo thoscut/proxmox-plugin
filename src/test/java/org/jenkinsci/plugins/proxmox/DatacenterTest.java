@@ -4,9 +4,8 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.is;
 
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -18,14 +17,14 @@ class DatacenterTest {
     @Test
     void getQemuMachines_returns_empty_for_null_node() {
         Datacenter dc = new Datacenter("host", "user", "pve", null, false);
-        HashMap<String, Integer> result = dc.getQemuMachines(null);
+        Map<Integer, String> result = dc.getQemuMachines(null);
         assertThat(result.isEmpty(), is(true));
     }
 
     @Test
     void getQemuMachines_returns_empty_for_empty_node() {
         Datacenter dc = new Datacenter("host", "user", "pve", null, false);
-        HashMap<String, Integer> result = dc.getQemuMachines("");
+        Map<Integer, String> result = dc.getQemuMachines("");
         assertThat(result.isEmpty(), is(true));
     }
 
@@ -61,5 +60,18 @@ class DatacenterTest {
     void getDatacenterDescription_format() {
         Datacenter dc = new Datacenter("myhost", "admin", "pam", null, false);
         assertThat(dc.getDatacenterDescription(), is("admin@pam - myhost"));
+    }
+
+    @Test
+    void cloud_names_are_unique_and_url_safe() {
+        Datacenter a = new Datacenter("pve1.example.com:8006", "admin", "pam", null, false);
+        Datacenter b = new Datacenter("pve2.example.com", "admin", "pam", null, false);
+        assertThat(a.name, is("proxmox-pve1.example.com_8006-admin-pam"));
+        assertThat(a.name.equals(b.name), is(false));
+    }
+
+    @Test
+    void cloud_name_only_contains_url_safe_characters() {
+        assertThat(Datacenter.cloudName("a b", "c/d", "h@st:1"), is("proxmox-h_st_1-a_b-c_d"));
     }
 }

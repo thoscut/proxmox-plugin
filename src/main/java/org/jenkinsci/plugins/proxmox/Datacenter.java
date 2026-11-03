@@ -11,17 +11,16 @@ import hudson.util.Secret;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.security.auth.login.LoginException;
 import jenkins.model.Jenkins;
-import net.sf.json.JSONObject;
 import org.jenkinsci.plugins.proxmox.pve2api.Connector;
+import org.jenkinsci.plugins.proxmox.pve2api.ProxmoxException;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.QueryParameter;
-import org.kohsuke.stapler.StaplerRequest2;
 import org.kohsuke.stapler.verb.POST;
 
 /**
@@ -40,7 +39,8 @@ public class Datacenter extends Cloud {
 
     @DataBoundConstructor
     public Datacenter(String hostname, String username, String realm, Secret password, Boolean ignoreSSL) {
-        super("Datacenter(proxmox)");
+        // Jenkins addresses clouds by name, so every datacenter needs a distinct one.
+        super(cloudName(username, realm, hostname));
         this.hostname = hostname;
         this.username = username;
         this.realm = realm;
@@ -49,10 +49,17 @@ public class Datacenter extends Cloud {
         this.pveConnector = null;
     }
 
+    static String cloudName(String username, String realm, String hostname) {
+        String raw = "proxmox-" + hostname + "-" + username + "-" + realm;
+        return raw.replaceAll("[^A-Za-z0-9._-]", "_");
+    }
+
+    @Override
     public Collection<NodeProvisioner.PlannedNode> provision(Label label, int excessWorkload) {
         return Collections.emptySet();
     }
 
+    @Override
     public boolean canProvision(Label label) {
         return false;
     }
@@ -86,7 +93,7 @@ public class Datacenter extends Cloud {
         return (DescriptorImpl) super.getDescriptor();
     }
 
-    public Connector proxmoxInstance() {
+    public synchronized Connector proxmoxInstance() {
         if (pveConnector == null) {
             pveConnector = new Connector(hostname, username, realm, password, ignoreSSL);
         }
@@ -94,50 +101,48 @@ public class Datacenter extends Cloud {
     }
 
     public List<String> getNodes() {
-        Connector pveConnector = proxmoxInstance();
         try {
-            return pveConnector.getNodes();
-        } catch (LoginException e) {
-            return new ArrayList<String>();
+            return proxmoxInstance().getNodes();
+        } catch (LoginException | ProxmoxException | RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Could not list nodes of " + getDatacenterDescription(), e);
+            return new ArrayList<>();
         }
     }
 
-    public HashMap<String, Integer> getQemuMachines(String node) {
+    /**
+     * @return the QEMU virtual machines of a node, keyed and sorted by VM id, with their names as values.
+     */
+    public Map<Integer, String> getQemuMachines(String node) {
         if (node == null || node.isEmpty()) {
-            return new HashMap<String, Integer>();
+            return Collections.emptyMap();
         }
 
-        Connector pveConnector = proxmoxInstance();
         try {
-            return pveConnector.getQemuMachines(node);
-        } catch (LoginException e) {
-            return new HashMap<String, Integer>();
+            return proxmoxInstance().getQemuMachines(node);
+        } catch (LoginException | ProxmoxException | RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Could not list virtual machines of node " + node, e);
+            return Collections.emptyMap();
         }
     }
 
     public List<String> getQemuMachineSnapshots(String node, Integer vmid) {
         if (node == null || node.isEmpty() || vmid == null || vmid < 1) {
-            return new ArrayList<String>();
+            return new ArrayList<>();
         }
 
-        Connector pveConnector = proxmoxInstance();
         try {
-            return pveConnector.getQemuMachineSnapshots(node, vmid);
-        } catch (LoginException e) {
-            return new ArrayList<String>();
+            return proxmoxInstance().getQemuMachineSnapshots(node, vmid);
+        } catch (LoginException | ProxmoxException | RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Could not list snapshots of virtual machine " + vmid, e);
+            return new ArrayList<>();
         }
     }
 
     @Extension
     public static final class DescriptorImpl extends Descriptor<Cloud> {
+        @Override
         public String getDisplayName() {
             return "Proxmox Datacenter";
-        }
-
-        @Override
-        public boolean configure(StaplerRequest2 req, JSONObject o) throws FormException {
-            save();
-            return super.configure(req, o);
         }
 
         private FormValidation fieldNotSpecifiedError(String fieldName) {
@@ -162,7 +167,7 @@ public class Datacenter extends Cloud {
         }
 
         public FormValidation doCheckPassword(@QueryParameter Secret value) {
-            return emptyStringValidation("Password", value.getPlainText());
+            return emptyStringValidation("Password", value == null ? null : value.getPlainText());
         }
 
         @POST
@@ -173,29 +178,29 @@ public class Datacenter extends Cloud {
                 @QueryParameter Secret password,
                 @QueryParameter Boolean ignoreSSL) {
             Jenkins.get().checkPermission(Jenkins.ADMINISTER);
-            try {
-                if (hostname.isEmpty()) {
-                    return fieldNotSpecifiedError("Hostname");
-                }
-                if (username.isEmpty()) {
-                    return fieldNotSpecifiedError("Username");
-                }
-                if (realm.isEmpty()) {
-                    return fieldNotSpecifiedError("Realm");
-                }
-                if (password.getPlainText().isEmpty()) {
-                    return fieldNotSpecifiedError("Password");
-                }
+            if (Util.fixEmptyAndTrim(hostname) == null) {
+                return fieldNotSpecifiedError("Hostname");
+            }
+            if (Util.fixEmptyAndTrim(username) == null) {
+                return fieldNotSpecifiedError("Username");
+            }
+            if (Util.fixEmptyAndTrim(realm) == null) {
+                return fieldNotSpecifiedError("Realm");
+            }
+            if (password == null || password.getPlainText().isEmpty()) {
+                return fieldNotSpecifiedError("Password");
+            }
 
-                try (Connector pveConnector = new Connector(hostname, username, realm, password, ignoreSSL)) {
-                    pveConnector.login();
-                    return FormValidation.ok("Login successful");
-                }
-
+            try (Connector pveConnector =
+                    new Connector(hostname.trim(), username.trim(), realm.trim(), password, ignoreSSL)) {
+                pveConnector.login();
+                return FormValidation.ok("Login successful");
             } catch (LoginException e) {
-                LOGGER.log(Level.SEVERE, "Authentication error", e);
-                return FormValidation.error(
-                        "Authentication error. Please verify your login credentials or check logs.");
+                LOGGER.log(Level.WARNING, "Proxmox authentication error", e);
+                return FormValidation.error("Authentication error: " + e.getMessage());
+            } catch (RuntimeException e) {
+                LOGGER.log(Level.WARNING, "Proxmox connection test failed", e);
+                return FormValidation.error("Connection failed: " + e.getMessage());
             }
         }
     }
