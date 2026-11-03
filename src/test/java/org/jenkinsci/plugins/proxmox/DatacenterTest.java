@@ -71,6 +71,26 @@ class DatacenterTest {
     }
 
     @Test
+    void credential_based_cloud_name_uses_the_credential_id() {
+        Datacenter dc = new Datacenter("pve.example.com", null, null, null, "proxmox-token", false);
+        assertThat(dc.name, is("proxmox-pve.example.com-proxmox-token"));
+        assertThat(dc.getCredentialsId(), is("proxmox-token"));
+    }
+
+    @Test
+    void blank_credential_id_is_treated_as_absent() {
+        Datacenter dc = new Datacenter("host", "admin", "pam", null, "  ", false);
+        assertThat(dc.getCredentialsId(), is((String) null));
+        assertThat(dc.getDatacenterDescription(), is("admin@pam - host"));
+    }
+
+    @Test
+    void description_falls_back_to_credential_id_without_jenkins() {
+        Datacenter dc = new Datacenter("host", null, null, null, "proxmox-token", false);
+        assertThat(dc.getDatacenterDescription(), is("proxmox-token - host"));
+    }
+
+    @Test
     void cloud_name_only_contains_url_safe_characters() {
         assertThat(Datacenter.cloudName("a b", "c/d", "h@st:1"), is("proxmox-h_st_1-a_b-c_d"));
     }
