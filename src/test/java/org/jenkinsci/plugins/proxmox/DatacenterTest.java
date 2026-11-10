@@ -1,11 +1,17 @@
 package org.jenkinsci.plugins.proxmox;
 
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.not;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import hudson.util.Secret;
 import java.util.List;
 import java.util.Map;
+import org.jenkinsci.plugins.proxmox.pve2api.ConnectorPool;
+import org.jenkinsci.plugins.proxmox.pve2api.ProxmoxAuth;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -99,5 +105,58 @@ class DatacenterTest {
     @Test
     void cloud_name_only_contains_url_safe_characters() {
         assertThat(Datacenter.cloudName("h@st:1", "a b-c/d"), is("proxmox-h_st_1-a_b-c_d"));
+    }
+
+    @Test
+    void resolve_auth_without_credential_uses_username_realm_and_password() {
+        ProxmoxAuth auth = Datacenter.resolveAuth("admin", "pam", null, null);
+        assertThat(auth.getUserAtRealm(), is("admin@pam"));
+        assertThat(auth, is(ProxmoxAuth.usernamePassword("admin", "pam", null)));
+        // A blank credential id counts as "no credential".
+        assertThat(Datacenter.resolveAuth("admin", "pam", null, "  "), is(auth));
+        // A realm inside the user name wins over the realm field.
+        assertThat(Datacenter.resolveAuth("root@pam", "pve", null, null).getUserAtRealm(), is("root@pam"));
+    }
+
+    @Test
+    void resolve_auth_with_credential_needs_a_running_jenkins() {
+        IllegalStateException e = assertThrows(
+                IllegalStateException.class, () -> Datacenter.resolveAuth(null, null, null, "proxmox-token"));
+        assertThat(e.getMessage(), containsString("proxmox-token"));
+    }
+
+    @Test
+    void instance_resolve_auth_without_credential_is_stable() {
+        Datacenter dc = new Datacenter("host", "admin", "pam", null, false);
+        assertThat(dc.resolveAuth(), is(dc.resolveAuth()));
+        assertThat(dc.resolveAuth().getUserAtRealm(), is("admin@pam"));
+    }
+
+    @Test
+    void equally_configured_datacenters_share_a_connector_key() {
+        Datacenter a = new Datacenter("host", "admin", "pam", Secret.fromString("pw"), false);
+        Datacenter b = new Datacenter("host", "admin@pam", "ignored", Secret.fromString("pw"), null);
+        Datacenter c = new Datacenter("host", "admin", "pam", Secret.fromString("other"), false);
+        assertThat(a.connectorKey(), is(b.connectorKey()));
+        assertThat(a.connectorKey(), is(not(c.connectorKey())));
+        ProxmoxAuth auth = ProxmoxAuth.usernamePassword("admin", "pam", Secret.fromString("pw"));
+        assertThat(a.connectorKey(), is(new ConnectorPool.Key("host", auth, false)));
+    }
+
+    @Test
+    void unresolvable_credential_fails_fast_without_touching_the_network() {
+        Datacenter dc = new Datacenter("host", null, null, null, "proxmox-token", false);
+        assertThrows(IllegalStateException.class, dc::resolveAuth);
+        assertThrows(IllegalStateException.class, dc::proxmoxInstance);
+        // The list helpers swallow the failure and return empty collections for the dropdowns.
+        assertThat(dc.getNodes(), is(empty()));
+        assertThat(dc.getQemuMachines("node1").isEmpty(), is(true));
+        assertThat(dc.getQemuMachineSnapshots("node1", 100), is(empty()));
+    }
+
+    @Test
+    void blank_description_is_never_matched() {
+        assertThat(Datacenter.findByDescription(""), is((Datacenter) null));
+        assertThat(Datacenter.findByDescription("   "), is((Datacenter) null));
     }
 }

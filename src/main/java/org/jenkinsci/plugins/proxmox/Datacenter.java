@@ -338,6 +338,9 @@ public class Datacenter extends Cloud {
         @POST
         public FormValidation doCheckHostname(@QueryParameter String value) {
             Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+            if (value != null && value.contains("@")) {
+                return FormValidation.error("Hostname must not contain user information; use the fields below");
+            }
             return emptyStringValidation("Hostname", value);
         }
 

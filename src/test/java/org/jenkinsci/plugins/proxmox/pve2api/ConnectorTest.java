@@ -142,4 +142,37 @@ class ConnectorTest {
             assertThrows(ProxmoxException.class, () -> connector.rollbackQemuMachineSnapshot("pve", 100, ".."));
         }
     }
+
+    @ParameterizedTest
+    @CsvSource({
+        "'   ', ''",
+        "'https://', ''",
+        "'::1', '[::1]'",
+        "'[::1]', '[::1]'",
+        "'[fd00::10]:8007', '[fd00::10]:8007'",
+        "PVE.Example.COM, PVE.Example.COM",
+        "' https://pve.example.com:8006/api2/json/ ', pve.example.com:8006",
+        "pve.example.com:8006/, pve.example.com:8006",
+        "pve.example.com/api2/json?x=1, pve.example.com"
+    })
+    void normalize_host_strips_scheme_path_and_whitespace(String input, String expected) {
+        assertThat(Connector.normalizeHost(input), is(expected));
+    }
+
+    @Test
+    void bracketed_ipv6_host_with_port_keeps_its_port() {
+        try (Connector connector = new Connector("[fd00::10]:8007", "user", "pve", null, false)) {
+            assertThat(connector.baseURL, is("https://[fd00::10]:8007/api2/json/"));
+        }
+    }
+
+    @Test
+    void task_success_is_case_sensitive_and_needs_both_fields() {
+        assertFalse(Connector.isTaskSuccessful(new JSONObject("{\"status\":\"stopped\"}")));
+        assertFalse(Connector.isTaskSuccessful(new JSONObject("{\"exitstatus\":\"OK\"}")));
+        assertFalse(Connector.isTaskSuccessful(new JSONObject("{\"status\":\"STOPPED\",\"exitstatus\":\"OK\"}")));
+        assertFalse(Connector.isTaskSuccessful(new JSONObject("{\"status\":\"stopped\",\"exitstatus\":\"ok\"}")));
+        assertFalse(Connector.isTaskSuccessful(
+                new JSONObject("{\"status\":\"stopped\",\"exitstatus\":\"WARNINGS: 1\"}")));
+    }
 }

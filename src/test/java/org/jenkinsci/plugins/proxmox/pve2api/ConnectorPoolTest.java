@@ -10,10 +10,12 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class ConnectorPoolTest {
 
+    @BeforeEach
     @AfterEach
     void closeAll() {
         ConnectorPool.closeAll();
@@ -72,5 +74,34 @@ class ConnectorPoolTest {
         assertThat(new ConnectorPool.Key("pve1", auth, true), is(not(new ConnectorPool.Key("pve1", auth, false))));
         assertThat(new ConnectorPool.Key("pve1", auth, null), is(new ConnectorPool.Key("pve1", auth, false)));
         assertThat(new ConnectorPool.Key("pve1", auth, false).toString().contains("pw"), is(false));
+    }
+
+    @Test
+    void the_requested_key_counts_as_in_use_even_when_absent_from_the_set() {
+        ConnectorPool.Key key = key("pve1", "pw");
+        Connector first = ConnectorPool.acquire(key, Collections.emptySet());
+        assertThat(ConnectorPool.acquire(key, Collections.emptySet()), is(sameInstance(first)));
+        assertThat(ConnectorPool.size(), is(1));
+        assertThat(ConnectorPool.retiredSize(), is(0));
+    }
+
+    @Test
+    void retired_connectors_are_not_revived() {
+        ConnectorPool.Key a = key("pve1", "pw");
+        ConnectorPool.Key b = key("pve2", "pw");
+        Connector first = ConnectorPool.acquire(a, Collections.singleton(a));
+        ConnectorPool.acquire(b, Collections.singleton(b)); // retires a
+        Connector again = ConnectorPool.acquire(a, Collections.singleton(a)); // retires b, creates a new a
+        assertThat(again, is(not(sameInstance(first))));
+        assertThat(ConnectorPool.size(), is(1));
+        assertThat(ConnectorPool.retiredSize(), is(2));
+    }
+
+    @Test
+    void equal_keys_have_equal_hash_codes() {
+        ProxmoxAuth auth = ProxmoxAuth.usernamePassword("jenkins", "pve", Secret.fromString("pw"));
+        assertThat(
+                new ConnectorPool.Key("pve1", auth, null).hashCode(),
+                is(new ConnectorPool.Key("pve1", auth, false).hashCode()));
     }
 }
