@@ -1,5 +1,5 @@
 <?jelly escape-by-default='true'?>
-<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:d="jelly:define" xmlns:l="/lib/layout" xmlns:t="/lib/hudson" xmlns:f="/lib/form" xmlns:sel="/lib/form">
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:d="jelly:define" xmlns:l="/lib/layout" xmlns:t="/lib/hudson" xmlns:f="/lib/form">
     <f:entry title="${%Datacenter}" field="datacenterDescription" help="/plugin/proxmox/help-vm-datacenterDescription.html">
         <f:select/>
     </f:entry>
@@ -51,7 +51,6 @@
 
     <f:slave-mode name="mode" node="${it}"/>
 
-	<j:set var="itDescriptor" value="${descriptor}"/>
     <f:dropdownList name="slave.delegateLauncher" title="${%Secondary launch method}"
                     help="${descriptor.getHelpFile('launcher')}">
         <j:forEach var="d" items="${descriptor.computerLauncherDescriptors(it)}">
@@ -70,25 +69,11 @@
     <!-- pointless to show this if there's only one option, which is the default -->
     <j:set var="retentionStrategies" value="${descriptor.retentionStrategyDescriptors(it)}"/>
     <j:if test="${retentionStrategies.size() gt 1}">
-        <f:dropdownList name="slave.retentionStrategy" title="${%Availability}"
-                        help="/help/system-config/master-slave/availability.html">
-            <j:forEach var="d" items="${retentionStrategies}">
-                <j:if test="${d != null}">
-                    <f:dropdownListBlock value="${d.clazz.name}" name="${d.displayName}"
-                                         selected="${it.retentionStrategy.descriptor==d}"
-                                         title="${d.displayName}">
-                        <j:set var="descriptor" value="${d}"/>
-                        <j:set var="instance"
-                               value="${it.retentionStrategy.descriptor==d ? it.retentionStrategy : null}"/>
-					    <f:class-entry descriptor="${d}" />
-                        <st:include from="${d}" page="${d.configPage}" optional="true"/>
-                    </f:dropdownListBlock>
-                </j:if>
-            </j:forEach>
-        </f:dropdownList>
+        <f:dropdownDescriptorSelector title="${%Availability}" field="retentionStrategy"
+                                      descriptors="${retentionStrategies}"/>
     </j:if>
 
-    <f:descriptorList title="${%Node Properties}" descriptors="${h.getNodePropertyDescriptors(descriptor.clazz)}"
+    <f:descriptorList title="${%Node Properties}" descriptors="${descriptor.nodePropertyDescriptors(it)}"
                       field="nodeProperties"/>
 
 </j:jelly>

@@ -105,7 +105,7 @@ public abstract class ProxmoxAuth {
             if (!isValidFormat()) {
                 return INVALID_TOKEN;
             }
-            return token.substring(0, token.indexOf('!'));
+            return token.substring(0, token.lastIndexOf('!'));
         }
 
         /** @return the value of the {@code Authorization} header. */
@@ -114,8 +114,9 @@ public abstract class ProxmoxAuth {
         }
 
         // user@realm!tokenid=secret, following Proxmox's syntax for user ids, realms and token ids.
+        // The user part may itself contain '@' (john@example.com@ldap); the realm is after the last one.
         private static final java.util.regex.Pattern FORMAT = java.util.regex.Pattern.compile(
-                "[^\\s:/@!=]+@[A-Za-z][A-Za-z0-9._-]*![A-Za-z][A-Za-z0-9._-]*=[A-Za-z0-9-]{8,}");
+                "[^\\s:/!=]+@[A-Za-z][A-Za-z0-9._-]+![A-Za-z][A-Za-z0-9._-]+=[A-Za-z0-9-]{8,}");
 
         @Override
         public boolean isValidFormat() {

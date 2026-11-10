@@ -49,10 +49,18 @@ class ProxmoxAuthTest {
     }
 
     @Test
+    void ldap_user_ids_with_an_at_sign_are_accepted() {
+        ProxmoxAuth.ApiToken token = token("john@example.com@ldap!ci=11111111-2222-3333-4444-555555555555");
+        assertTrue(token.isValidFormat());
+        assertThat(token.getUserAtRealm(), is("john@example.com@ldap"));
+    }
+
+    @Test
     void malformed_api_tokens_are_detected() {
         assertFalse(token("just-a-password").isValidFormat());
         assertFalse(token("jenkins@pve!ci=").isValidFormat());
         assertFalse(token("jenkins@pve!ci=short").isValidFormat());
+        assertFalse(token("jenkins@p!ci=11111111-2222-3333-4444-555555555555").isValidFormat());
         assertFalse(token("jenkins@pve!ci=11111111-2222-3333-4444-555555555555 x").isValidFormat());
         assertFalse(token("jenkins@pve/x!ci=11111111-2222-3333-4444-555555555555").isValidFormat());
         assertFalse(((ProxmoxAuth.ApiToken) ProxmoxAuth.apiToken(null)).isValidFormat());

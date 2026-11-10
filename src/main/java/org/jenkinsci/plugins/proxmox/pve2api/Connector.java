@@ -224,7 +224,6 @@ public class Connector implements AutoCloseable {
                     .field("password", credentials.getPlainPassword())
                     .asJson();
         } catch (UnirestException e) {
-            LOGGER.log(Level.WARNING, "Could not connect to Proxmox at " + baseURL, e);
             throw loginException("Could not connect to " + baseURL + ": " + e.getMessage(), e);
         }
         if (!response.isSuccess()) {
@@ -235,7 +234,6 @@ public class Connector implements AutoCloseable {
             ticket = new Ticket(
                     data.getString("ticket"), data.getString("CSRFPreventionToken"), System.currentTimeMillis());
         } catch (RuntimeException e) {
-            LOGGER.log(Level.SEVERE, "Failed reading JSON response", e);
             throw loginException("Failed reading JSON response", e);
         }
     }
@@ -246,7 +244,7 @@ public class Connector implements AutoCloseable {
         return e;
     }
 
-    public synchronized void checkIfAuthTicketIsValid() throws LoginException {
+    private synchronized void checkIfAuthTicketIsValid() throws LoginException {
         if (usesApiToken()) {
             return;
         }
@@ -378,7 +376,6 @@ public class Connector implements AutoCloseable {
                 return lastTaskStatus;
             }
             if (System.currentTimeMillis() - startTime > taskTimeoutMs) {
-                LOGGER.log(Level.WARNING, "Task " + taskId + " on node " + node + " did not finish in time");
                 throw new ProxmoxException("Task " + taskId + " on node " + node + " did not finish within "
                         + (taskTimeoutMs / 1000) + " seconds");
             }

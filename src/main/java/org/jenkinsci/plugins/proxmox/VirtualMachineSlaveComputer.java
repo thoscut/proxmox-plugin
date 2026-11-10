@@ -8,6 +8,7 @@ import hudson.model.Slave;
 import hudson.slaves.ComputerLauncher;
 import hudson.slaves.OfflineCause;
 import hudson.slaves.SlaveComputer;
+import hudson.util.Futures;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -21,18 +22,24 @@ public class VirtualMachineSlaveComputer extends SlaveComputer {
 
     private final AtomicBoolean isRevertingSnapshot = new AtomicBoolean(false);
 
+    /** The executor thread that is reverting the snapshot; only it may relaunch the agent meanwhile. */
+    private volatile Thread revertingThread;
+
     public VirtualMachineSlaveComputer(Slave slave) {
         super(slave);
     }
 
+    /**
+     * While a snapshot is being reverted, the agent is offline on purpose. Retention strategies and
+     * reconnect attempts would otherwise start the VM (or an SSH launch) in the middle of the rollback.
+     */
     @Override
-    public void tryReconnect() {
-        if (isRevertingSnapshot.get()) {
-            getListener().getLogger().println("INFO: trying to reconnect while snapshot revert - ignoring");
-            return;
+    protected Future<?> _connect(boolean forceReconnect) {
+        if (isRevertingSnapshot.get() && Thread.currentThread() != revertingThread) {
+            getListener().getLogger().println("INFO: connect requested during snapshot revert - ignoring");
+            return Futures.precomputed(null);
         }
-
-        super.tryReconnect();
+        return super._connect(forceReconnect);
     }
 
     @Override
@@ -64,18 +71,27 @@ public class VirtualMachineSlaveComputer extends SlaveComputer {
             return;
         }
 
+        revertingThread = Thread.currentThread();
         try {
-            final Future<?> disconnectFuture = disconnect(
-                    OfflineCause.create(Messages._VirtualMachineSlaveComputer_disconnectBeforeSnapshotRevert()));
-            disconnectFuture.get();
+            try {
+                disconnect(OfflineCause.create(Messages._VirtualMachineSlaveComputer_disconnectBeforeSnapshotRevert()))
+                        .get();
+            } catch (ExecutionException e) {
+                abort(executor, "Disconnecting the agent failed: " + causeMessage(e), e);
+                return;
+            }
             getListener().getLogger().println("INFO: agent disconnected");
 
             launcher.revertSnapshot(this, getListener());
             getListener().getLogger().println("INFO: snapshot reverted");
 
-            // Go through connect() so Jenkins knows a launch is in progress (isConnecting) and
-            // retention strategies do not start a second, overlapping launch.
-            connect(true).get();
+            // Go through connect() so Jenkins knows a launch is in progress (isConnecting).
+            try {
+                connect(true).get();
+            } catch (ExecutionException e) {
+                abort(executor, "Agent did not reconnect after the snapshot revert: " + causeMessage(e), e);
+                return;
+            }
             if (getChannel() == null) {
                 abort(executor, "Agent did not reconnect after the snapshot revert", null);
                 return;
@@ -84,13 +100,17 @@ public class VirtualMachineSlaveComputer extends SlaveComputer {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             abort(executor, "Interrupted while reverting the snapshot", e);
-        } catch (ExecutionException e) {
-            abort(executor, "Exception while performing asynchronous disconnect: " + e.getMessage(), e);
         } catch (Exception e) {
             abort(executor, "Snapshot revert failed: " + e.getMessage(), e);
         } finally {
+            revertingThread = null;
             isRevertingSnapshot.set(false);
         }
+    }
+
+    private static String causeMessage(ExecutionException e) {
+        Throwable cause = e.getCause() == null ? e : e.getCause();
+        return cause.getMessage() == null ? cause.toString() : cause.getMessage();
     }
 
     /**

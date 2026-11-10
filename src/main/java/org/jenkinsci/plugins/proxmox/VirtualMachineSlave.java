@@ -156,8 +156,7 @@ public class VirtualMachineSlave extends Slave {
 
     @Override
     public Computer createComputer() {
-        // TODO: Not sure if this is needed, could be able to use this to reset to snapshots
-        // TODO: as a computer is required for a job.
+        // The computer implements the "Before every job" revert in taskAccepted().
         return new VirtualMachineSlaveComputer(this);
     }
 

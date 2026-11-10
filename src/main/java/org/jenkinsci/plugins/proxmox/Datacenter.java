@@ -27,6 +27,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.security.auth.login.LoginException;
 import jenkins.model.Jenkins;
+import org.jenkinsci.Symbol;
 import org.jenkinsci.plugins.plaincredentials.StringCredentials;
 import org.jenkinsci.plugins.proxmox.pve2api.Connector;
 import org.jenkinsci.plugins.proxmox.pve2api.ConnectorPool;
@@ -181,7 +182,7 @@ public class Datacenter extends Cloud {
         }
         if (hostnameMatches == 1) {
             LOGGER.log(
-                    Level.INFO,
+                    Level.FINE,
                     "No datacenter matches '{0}' exactly; using the only one with that hostname: {1}",
                     new Object[] {description, byHostname.getDatacenterDescription()});
             return byHostname;
@@ -254,7 +255,7 @@ public class Datacenter extends Cloud {
      * @return the shared connector for this datacenter's configuration
      * @throws IllegalStateException if the configured credential cannot be resolved
      */
-    public Connector proxmoxInstance() {
+    Connector proxmoxInstance() {
         ConnectorPool.Key own = connectorKey();
         Set<ConnectorPool.Key> inUse = new HashSet<>();
         inUse.add(own);
@@ -279,7 +280,7 @@ public class Datacenter extends Cloud {
         ConnectorPool.closeAll();
     }
 
-    public List<String> getNodes() {
+    List<String> getNodes() {
         try {
             return proxmoxInstance().getNodes();
         } catch (LoginException | ProxmoxException | RuntimeException e) {
@@ -291,7 +292,7 @@ public class Datacenter extends Cloud {
     /**
      * @return the QEMU virtual machines of a node, keyed and sorted by VM id, with their names as values.
      */
-    public Map<Integer, String> getQemuMachines(String node) {
+    Map<Integer, String> getQemuMachines(String node) {
         if (node == null || node.isEmpty()) {
             return Collections.emptyMap();
         }
@@ -304,7 +305,7 @@ public class Datacenter extends Cloud {
         }
     }
 
-    public List<String> getQemuMachineSnapshots(String node, Integer vmid) {
+    List<String> getQemuMachineSnapshots(String node, Integer vmid) {
         if (node == null || node.isEmpty() || vmid == null || vmid < 1) {
             return new ArrayList<>();
         }
@@ -318,6 +319,7 @@ public class Datacenter extends Cloud {
     }
 
     @Extension
+    @Symbol("datacenter")
     public static final class DescriptorImpl extends Descriptor<Cloud> {
         @Override
         public String getDisplayName() {
@@ -333,7 +335,9 @@ public class Datacenter extends Cloud {
             else return FormValidation.ok();
         }
 
+        @POST
         public FormValidation doCheckHostname(@QueryParameter String value) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             return emptyStringValidation("Hostname", value);
         }
 
