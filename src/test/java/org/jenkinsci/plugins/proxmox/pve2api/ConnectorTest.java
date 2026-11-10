@@ -77,7 +77,7 @@ class ConnectorTest {
         assertThat(Connector.taskSegment(ldapUpid), is(ldapUpid));
         assertThat(
                 Connector.encodePathSegment(ldapUpid),
-                is("UPID:pve:00001234:00ABCDEF:5F000000:qmstart:100:john.doe%2Bci@ldap!token:"));
+                is("UPID:pve:00001234:00ABCDEF:5F000000:qmstart:100:john.doe%2Bci@ldap%21token:"));
         assertThat(Connector.nodeSegment("pve-node1.local"), is("pve-node1.local"));
         assertThat(Connector.snapshotSegment("clean_v2-final"), is("clean_v2-final"));
     }
