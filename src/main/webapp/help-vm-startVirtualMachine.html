@@ -1,4 +1,5 @@
 <div>
-    The virtual machine will be started once the snapshot has been reverted.
-    (Useful if the snapshot did not include RAM - and won't therefore be reverted in a running state).
+    Start the virtual machine if it is not running, after the snapshot has been reverted (or at
+    every launch when nothing is reverted). Needed when the snapshot was taken without RAM,
+    because such a snapshot is restored in the stopped state.
 </div>

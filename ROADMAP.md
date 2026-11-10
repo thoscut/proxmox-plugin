@@ -14,6 +14,10 @@ bug-fix pull request. Ordered roughly by value.
 - **Inbound agents and "After connect".** The launcher waits for the inbound agent for the
   configured period. A dedicated "wait for agent" option, separate from the boot delay for
   SSH agents, would make the behaviour explicit.
+- **Dropdown errors are swallowed.** When loading nodes, VMs or snapshots fails, the dropdowns
+  stay empty and the cause is only in the Jenkins log. Show an `[Error: ...]` entry instead.
+- **"Before every job" skips the startup wait on the first launch.** The initial launch starts
+  the VM and hands over to the delegate launcher immediately; only the per-job relaunch waits.
 - **Shutting down VMs on Jenkins restart.** With "After connect", every disconnect, including a
   controller restart, shuts the VM down. An option to skip the shutdown on restart would keep
   agents warm.
@@ -34,5 +38,12 @@ bug-fix pull request. Ordered roughly by value.
 - **Connector tests against a fake server.** The Connector is only unit-tested for parsing and
   URL building. A WireMock HTTPS server (or a package-private base-URL constructor and a plain
   `HttpServer`) would cover login, ticket renewal, 401 retry, task polling and error mapping.
+- **Reuse the core agent form.** `configure-entries.jelly` copies the node fields from core
+  (`DumbSlave`). Including the core page or `f:dropdownDescriptorSelector` would pick up core
+  changes automatically.
+- **Treat a missing `startVM` as true.** Configuration as Code omits `startVM: false` on export
+  and old configurations have no value; `null` should mean the UI default (`true`).
+- **Remove deprecated API in 1.0.** The 5-argument `Datacenter` constructor and
+  `VirtualMachineLauncher.getDelegate()` only exist for old `config.xml` files.
 - **Internationalisation.** Display names and validation messages are hard-coded; move them to
   `Messages.properties`.

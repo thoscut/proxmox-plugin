@@ -113,11 +113,13 @@ public abstract class ProxmoxAuth {
             return PREFIX + token;
         }
 
+        // user@realm!tokenid=secret, following Proxmox's syntax for user ids, realms and token ids.
+        private static final java.util.regex.Pattern FORMAT = java.util.regex.Pattern.compile(
+                "[^\\s:/@!=]+@[A-Za-z][A-Za-z0-9._-]*![A-Za-z][A-Za-z0-9._-]*=[A-Za-z0-9-]{8,}");
+
         @Override
         public boolean isValidFormat() {
-            int bang = token.indexOf('!');
-            int eq = token.indexOf('=');
-            return bang > 0 && eq > bang + 1 && eq < token.length() - 1 && token.indexOf('@') > 0;
+            return FORMAT.matcher(token).matches();
         }
 
         @Override

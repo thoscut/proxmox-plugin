@@ -4,6 +4,7 @@ import hudson.Extension;
 import hudson.model.Descriptor;
 import hudson.model.DescriptorVisibilityFilter;
 import hudson.model.TaskListener;
+import hudson.remoting.Channel;
 import hudson.slaves.ComputerLauncher;
 import hudson.slaves.DelegatingComputerLauncher;
 import hudson.slaves.JNLPLauncher;
@@ -139,6 +140,9 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
         if (datacenterDescription != null && virtualMachineId != null) {
             datacenter = Datacenter.findByDescription(datacenterDescription);
         }
+        if (virtualMachineId == null) {
+            throw new IllegalStateException("No virtual machine is configured for this agent");
+        }
         if (datacenter == null) {
             throw new IllegalStateException("Could not find the proxmox datacenter instance '" + datacenterDescription
                     + "' for virtual machine " + virtualMachineId + "!");
@@ -157,7 +161,7 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
     /**
      * Legacy configurations, which were created before the revert policy existed, always reverted after connect.
      */
-    private RevertPolicy effectiveRevertPolicy() {
+    public RevertPolicy effectiveRevertPolicy() {
         return revertPolicy == null ? RevertPolicy.AFTER_CONNECT : revertPolicy;
     }
 
@@ -220,6 +224,7 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
                 String taskId = pve.rollbackQemuMachineSnapshot(datacenterNode, virtualMachineId, snapshotName);
                 taskListener.getLogger().println("Proxmox returned: " + taskId);
                 awaitTask(pve, taskId, "roll back", taskListener);
+                closeStaleChannel(slaveComputer, taskListener);
             }
         } catch (LoginException e) {
             throw new IOException("Login to Proxmox failed: " + e.getMessage(), e);
@@ -233,20 +238,42 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
     }
 
     /**
+     * An inbound agent of the old guest may have reconnected in the seconds before the rollback
+     * took effect. That channel is dead now, but Jenkins would only notice after the ping timeout
+     * and meanwhile run builds on it.
+     */
+    private static void closeStaleChannel(SlaveComputer slaveComputer, TaskListener taskListener) {
+        Channel channel = slaveComputer.getChannel();
+        if (channel != null) {
+            taskListener.getLogger().println("Closing the agent connection that predates the rollback.");
+            try {
+                channel.close();
+            } catch (IOException e) {
+                LOGGER.log(Level.FINE, "Closing the stale channel of " + slaveComputer.getName() + " failed", e);
+            }
+        }
+    }
+
+    /** Inbound agents wait this long for the guest to connect back when no waiting period is configured. */
+    static final int DEFAULT_INBOUND_WAIT_SECS = 300;
+
+    /**
      * Gives the reverted or started virtual machine time to boot. An inbound (JNLP) agent connects
      * back on its own, so for it the method returns as soon as the channel is up; without this wait
      * Jenkins would treat the launch as failed and revert the machine again on every reconnect attempt.
      */
     private void waitForVirtualMachine(SlaveComputer slaveComputer, TaskListener taskListener)
             throws InterruptedException {
-        if (waitingTimeSecs <= 0) {
-            return;
-        }
         if (!(launcher instanceof JNLPLauncher)) {
-            Thread.sleep(waitingTimeSecs * 1000L);
+            if (waitingTimeSecs > 0) {
+                Thread.sleep(waitingTimeSecs * 1000L);
+            }
             return;
         }
-        long deadline = System.currentTimeMillis() + waitingTimeSecs * 1000L;
+        // Before inbound agents were waited for, the period was ignored for them, so 0 is common
+        // in existing configurations; returning at once would make Jenkins revert the VM again.
+        int waitSecs = waitingTimeSecs > 0 ? waitingTimeSecs : DEFAULT_INBOUND_WAIT_SECS;
+        long deadline = System.currentTimeMillis() + waitSecs * 1000L;
         while (System.currentTimeMillis() < deadline) {
             if (slaveComputer.getChannel() != null) {
                 taskListener.getLogger().println("Inbound agent connected.");
@@ -254,9 +281,7 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
             }
             Thread.sleep(Connector.WAIT_TIME_MS);
         }
-        taskListener
-                .getLogger()
-                .println("Inbound agent did not connect within " + waitingTimeSecs + " seconds; waiting for it.");
+        taskListener.getLogger().println("Inbound agent did not connect within " + waitSecs + " seconds.");
     }
 
     @Override
@@ -289,6 +314,10 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
 
         // try to gracefully shutdown the virtual machine
         try {
+            if (!pve.isQemuMachineRunning(datacenterNode, virtualMachineId)) {
+                taskListener.getLogger().println("Virtual machine is not running; nothing to shut down.");
+                return;
+            }
             String taskId = pve.shutdownQemuMachine(datacenterNode, virtualMachineId);
             JSONObject taskStatus = pve.waitForTaskToFinish(datacenterNode, taskId);
             if (Connector.isTaskSuccessful(taskStatus)) {

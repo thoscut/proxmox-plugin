@@ -50,14 +50,21 @@ public class VirtualMachineSlaveComputer extends SlaveComputer {
         }
         final VirtualMachineLauncher launcher = (VirtualMachineLauncher) nodeLauncher;
 
+        // The launcher's policy is the source of truth; the node attribute only mirrors it.
         if (!launcher.isLaunchSupported()
-                || slave.getRevertPolicy() != VirtualMachineLauncher.RevertPolicy.BEFORE_JOB) {
+                || launcher.effectiveRevertPolicy() != VirtualMachineLauncher.RevertPolicy.BEFORE_JOB) {
+            return;
+        }
+
+        // Two tasks accepted at once (more than one executor) must not revert the same VM twice,
+        // nor may the second one run while the first revert is tearing the agent down.
+        if (!isRevertingSnapshot.compareAndSet(false, true)) {
+            abort(executor, "Another task is already reverting this virtual machine; "
+                    + "use a single executor with the revert policy 'Before every job'", null);
             return;
         }
 
         try {
-            isRevertingSnapshot.set(true);
-
             final Future<?> disconnectFuture = disconnect(
                     OfflineCause.create(Messages._VirtualMachineSlaveComputer_disconnectBeforeSnapshotRevert()));
             disconnectFuture.get();
@@ -66,7 +73,13 @@ public class VirtualMachineSlaveComputer extends SlaveComputer {
             launcher.revertSnapshot(this, getListener());
             getListener().getLogger().println("INFO: snapshot reverted");
 
-            launcher.launch(this, getListener());
+            // Go through connect() so Jenkins knows a launch is in progress (isConnecting) and
+            // retention strategies do not start a second, overlapping launch.
+            connect(true).get();
+            if (getChannel() == null) {
+                abort(executor, "Agent did not reconnect after the snapshot revert", null);
+                return;
+            }
             getListener().getLogger().println("INFO: agent launched");
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -86,7 +99,11 @@ public class VirtualMachineSlaveComputer extends SlaveComputer {
      */
     private void abort(Executor executor, String message, Exception e) {
         getListener().getLogger().println("ERROR: " + message);
-        LOGGER.log(Level.WARNING, "Reverting " + getName() + " before the job failed", e);
+        if (e != null) {
+            LOGGER.log(Level.WARNING, "Reverting " + getName() + " before the job failed", e);
+        } else {
+            LOGGER.log(Level.WARNING, "Reverting {0} before the job failed: {1}", new Object[] {getName(), message});
+        }
         if (executor != null) {
             executor.interrupt(Result.FAILURE, new SnapshotRevertFailed(message));
         }

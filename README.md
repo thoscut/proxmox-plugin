@@ -18,6 +18,9 @@ This plugin allows the use of Proxmox virtual machines as agents in Jenkins.
 -   To never roll back the virtual machine, select the snapshot `current`.
 -   A failed rollback or start of the virtual machine aborts the agent launch (or the job,
     with the revert policy "Before every job").
+-   Agents are static; the cloud does not provision agents on demand.
+-   With the revert policy "After connect" the virtual machine is shut down whenever the agent
+    disconnects, including controller restarts.
 
 ## Configuration
 
@@ -25,6 +28,8 @@ This plugin allows the use of Proxmox virtual machines as agents in Jenkins.
 
 Use a dedicated Proxmox user for Jenkins with the least privileges needed on the
 agent VMs (or their pool): `VM.Audit`, `VM.PowerMgmt` and `VM.Snapshot.Rollback`.
+Grant them on `/vms/<vmid>` (or the pool path); no `Sys.Audit` is needed. With *Privilege
+Separation*, grant the same ACL to the token itself (`user@realm!tokenid`).
 Everyone who may configure Jenkins agents can select VMs and snapshots of that account.
 
 Authentication uses a Jenkins credential: either a *Username with password* credential
@@ -43,8 +48,8 @@ click "New cloud" and select "Proxmox Datacenter".
 #### Virtual machine agents
 
 To add agents go to "Manage Jenkins" > "Nodes" and click "New Node". Select the
-node type "Agent virtual machine running on a Proxmox datacenter." and
-enter a name for the node.
+node type "Agent virtual machine running on a Proxmox datacenter" and
+enter a name for the node. The revert policy "Before every job" requires exactly one executor.
 
 #### Configuration as Code
 
@@ -72,9 +77,14 @@ jenkins:
           jnlp
 ```
 
+`launcher` is the agent's own launch method (`jnlp`, `ssh`, ...); the plugin wraps it in its
+virtual machine launcher. `delegateLauncher` is accepted as an alias. An export shows
+`launcher: virtualMachineLauncher: {launcher: jnlp, ...}`, which is accepted on re-import.
+`startVM` defaults to `false` when omitted.
+
 ## Manually Installing
  1. Clone this repo.
- 2. Run ``mvn clean package``. 
+ 2. Run ``mvn clean package`` (requires JDK 17 or 21).
  3. Go to Jenkins in a web browser.
  4. Go to *"Manage Jenkins"* > *"Plugins"* > *"Advanced settings"*.
  5. Upload the file `target/proxmox.hpi` under the *"Deploy Plugin"* section.

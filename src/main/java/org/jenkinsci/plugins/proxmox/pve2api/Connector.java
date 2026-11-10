@@ -111,14 +111,19 @@ public class Connector implements AutoCloseable {
         if (pathStart >= 0) {
             host = host.substring(0, pathStart);
         }
+        // A bare IPv6 address needs brackets to be a valid URI host.
+        if (host.indexOf(':') != host.lastIndexOf(':') && !host.startsWith("[")) {
+            host = "[" + host + "]";
+        }
         return host;
     }
 
     // Proxmox's own syntax for node names, snapshot names and task ids (UPIDs).
     private static final Pattern NODE_NAME = Pattern.compile("[A-Za-z0-9][A-Za-z0-9.-]*");
     private static final Pattern SNAPSHOT_NAME = Pattern.compile("[A-Za-z][A-Za-z0-9_-]*");
-    // UPIDs of tasks started with an API token contain the token id: ...:root@pam!jenkins:
-    private static final Pattern TASK_ID = Pattern.compile("UPID:[A-Za-z0-9:._@!-]+");
+    // UPIDs contain the user id, which may be any non-blank text without ':' or '/', e.g. john.doe+ci@ldap!token.
+    // '/' would act as a path separator on the server even when encoded; everything else is encoded.
+    private static final Pattern TASK_ID = Pattern.compile("UPID:[^\\s/%]+");
 
     static String nodeSegment(String node) throws ProxmoxException {
         if (node == null || !NODE_NAME.matcher(node).matches()) {

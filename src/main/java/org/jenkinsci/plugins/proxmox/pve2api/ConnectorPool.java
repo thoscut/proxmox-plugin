@@ -56,9 +56,10 @@ public final class ConnectorPool {
 
     /**
      * A connector whose configuration disappeared may still be used by a launch that started
-     * before, so it is closed only after the longest request sequence can have finished.
+     * before, so it is closed only after the longest request sequence (two tasks, e.g. rollback
+     * and start, plus a few plain requests) can have finished.
      */
-    static final long RETIRE_GRACE_MS = Connector.DEFAULT_TASK_TIMEOUT_MS + 2 * Connector.SOCKET_TIMEOUT_MS;
+    static final long RETIRE_GRACE_MS = 2 * Connector.DEFAULT_TASK_TIMEOUT_MS + 4 * Connector.SOCKET_TIMEOUT_MS;
 
     private static final class Retired {
         final Connector connector;

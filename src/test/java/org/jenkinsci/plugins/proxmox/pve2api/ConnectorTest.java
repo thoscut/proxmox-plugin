@@ -42,6 +42,7 @@ class ConnectorTest {
         "' pve.example.com ', https://pve.example.com:8006/api2/json/",
         "10.0.0.1, https://10.0.0.1:8006/api2/json/",
         "'[::1]:8007', 'https://[::1]:8007/api2/json/'",
+        "'fd00::10', 'https://[fd00::10]:8006/api2/json/'",
         "https://pve.example.com:8006/api2/json, https://pve.example.com:8006/api2/json/",
         "http://pve.example.com, https://pve.example.com:8006/api2/json/",
         "pve.example.com/, https://pve.example.com:8006/api2/json/",
@@ -71,6 +72,12 @@ class ConnectorTest {
         // Tasks started with an API token carry the token id after '!'.
         String upid = "UPID:pve:00001234:00ABCDEF:5F000000:qmstart:100:root@pam!ci:";
         assertThat(Connector.taskSegment(upid), is(upid));
+        // LDAP or OIDC user ids may contain characters beyond [A-Za-z0-9_-].
+        String ldapUpid = "UPID:pve:00001234:00ABCDEF:5F000000:qmstart:100:john.doe+ci@ldap!token:";
+        assertThat(Connector.taskSegment(ldapUpid), is(ldapUpid));
+        assertThat(
+                Connector.encodePathSegment(ldapUpid),
+                is("UPID:pve:00001234:00ABCDEF:5F000000:qmstart:100:john.doe%2Bci@ldap!token:"));
         assertThat(Connector.nodeSegment("pve-node1.local"), is("pve-node1.local"));
         assertThat(Connector.snapshotSegment("clean_v2-final"), is("clean_v2-final"));
     }

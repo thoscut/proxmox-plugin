@@ -1,3 +1,11 @@
 <div>
-    Snapshot revert can be done after every vm launch (connect etc.) or before every job
+    <b>After connect</b>: when Jenkins launches the agent, the virtual machine is rolled back to
+    the snapshot, started if needed, and the agent connects. When the agent disconnects (also on
+    a controller restart) the virtual machine is shut down.
+    <br/>
+    <b>Before every job</b>: each time a build is assigned to the agent, the agent is
+    disconnected, the virtual machine is rolled back and started, and the agent is relaunched.
+    If that fails the build is aborted. The virtual machine is not shut down on disconnect.
+    This policy requires exactly one executor, because the disconnect would interrupt builds
+    running on other executors.
 </div>

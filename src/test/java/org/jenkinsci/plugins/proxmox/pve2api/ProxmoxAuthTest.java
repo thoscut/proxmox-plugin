@@ -42,9 +42,9 @@ class ProxmoxAuthTest {
 
     @Test
     void api_token_accepts_the_header_form_from_the_proxmox_ui() {
-        ProxmoxAuth.ApiToken token =
-                (ProxmoxAuth.ApiToken) ProxmoxAuth.apiToken(Secret.fromString(" PVEAPIToken=jenkins@pve!ci=abc "));
-        assertThat(token.getAuthorizationHeader(), is("PVEAPIToken=jenkins@pve!ci=abc"));
+        Secret secret = Secret.fromString(" PVEAPIToken=jenkins@pve!ci=abcdef12-3456 ");
+        ProxmoxAuth.ApiToken token = (ProxmoxAuth.ApiToken) ProxmoxAuth.apiToken(secret);
+        assertThat(token.getAuthorizationHeader(), is("PVEAPIToken=jenkins@pve!ci=abcdef12-3456"));
         assertTrue(token.isValidFormat());
     }
 
@@ -52,6 +52,9 @@ class ProxmoxAuthTest {
     void malformed_api_tokens_are_detected() {
         assertFalse(token("just-a-password").isValidFormat());
         assertFalse(token("jenkins@pve!ci=").isValidFormat());
+        assertFalse(token("jenkins@pve!ci=short").isValidFormat());
+        assertFalse(token("jenkins@pve!ci=11111111-2222-3333-4444-555555555555 x").isValidFormat());
+        assertFalse(token("jenkins@pve/x!ci=11111111-2222-3333-4444-555555555555").isValidFormat());
         assertFalse(((ProxmoxAuth.ApiToken) ProxmoxAuth.apiToken(null)).isValidFormat());
     }
 

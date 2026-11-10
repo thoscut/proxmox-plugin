@@ -10,11 +10,11 @@
 
   <groupId>org.jenkins-ci.plugins</groupId>
   <artifactId>proxmox</artifactId>
-  <version>0.7.2-SNAPSHOT</version>
+  <version>0.8.0-SNAPSHOT</version>
   <packaging>hpi</packaging>
 
   <name>Jenkins Proxmox plugin</name>
-  <description>This plugin allows Jenkins to use Proxmox virtual machines as slaves.</description>
+  <description>This plugin lets Jenkins use Proxmox VE virtual machines as agents.</description>
   <url>https://github.com/jenkinsci/proxmox-plugin</url>
 
   <organization>
@@ -41,7 +41,6 @@
     <jenkins.baseline>2.479</jenkins.baseline>
     <jenkins.version>${jenkins.baseline}.3</jenkins.version>
     <ban-junit4-imports.skip>false</ban-junit4-imports.skip>
-    <slf4jVersion>1.7.26</slf4jVersion>
   </properties>
 
   <dependencyManagement>
@@ -63,8 +62,9 @@
       <version>3.14.5</version>
     </dependency>
     <dependency>
-        <groupId>io.jenkins.plugins</groupId>
-        <artifactId>json-api</artifactId>
+      <!-- provides org.json, which unirest-java repackages as kong.unirest.json -->
+      <groupId>io.jenkins.plugins</groupId>
+      <artifactId>json-api</artifactId>
     </dependency>
     <dependency>
       <groupId>org.jenkins-ci.plugins</groupId>

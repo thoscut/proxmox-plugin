@@ -4,11 +4,11 @@
         <f:select/>
     </f:entry>
 
-    <f:entry title="${%Datacenter Node}" field="datacenterNode">
+    <f:entry title="${%Datacenter Node}" field="datacenterNode" help="/plugin/proxmox/help-vm-datacenterNode.html">
         <f:select fillDependsOn="datacenterDescription" />
     </f:entry>
 
-    <f:entry title="${%Virtual Machine}" field="virtualMachineId">
+    <f:entry title="${%Virtual Machine}" field="virtualMachineId" help="/plugin/proxmox/help-vm-virtualMachineId.html">
         <f:select fillDependsOn="datacenterDescription,datacenterNode" />
     </f:entry>
 
@@ -22,7 +22,7 @@
     <f:entry title="${%Start Virtual Machine}" field="startVM" help="/plugin/proxmox/help-vm-startVirtualMachine.html">
         <f:checkbox default="true" />
     </f:entry>
-    
+
     <f:entry title="${%Revert policy}" field="revertPolicy" help="/plugin/proxmox/help-vm-revertPolicy.html">
         <f:enum field="revertPolicy">
             ${it.getLabel()}
@@ -33,15 +33,15 @@
         <f:textbox field="nodeDescription"/>
     </f:entry>
 
-    <f:entry title="${%Startup Idle (sec)}" field="startupWaitingPeriodSeconds" help="/plugin/proxmox/help-vm-waitingPeriod.html">
+    <f:entry title="${%Startup wait (sec)}" field="startupWaitingPeriodSeconds" help="/plugin/proxmox/help-vm-waitingPeriod.html">
         <f:number default="60" clazz="number" min="0" step="1"/>
     </f:entry>
 
-    <f:entry title="${%# of executors}" field="numExecutors">
-        <f:textbox/>
+    <f:entry title="${%Number of executors}" field="numExecutors">
+        <f:number clazz="positive-number-required" min="1" step="1" default="1"/>
     </f:entry>
 
-    <f:entry title="${%Remote FS root}" field="remoteFS">
+    <f:entry title="${%Remote root directory}" field="remoteFS">
         <f:textbox/>
     </f:entry>
 
