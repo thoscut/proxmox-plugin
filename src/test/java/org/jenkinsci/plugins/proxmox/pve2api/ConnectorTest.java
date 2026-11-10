@@ -42,6 +42,7 @@ class ConnectorTest {
         "' pve.example.com ', https://pve.example.com:8006/api2/json/",
         "10.0.0.1, https://10.0.0.1:8006/api2/json/",
         "'[::1]:8007', 'https://[::1]:8007/api2/json/'",
+        "'fd00::10', 'https://[fd00::10]:8006/api2/json/'",
         "https://pve.example.com:8006/api2/json, https://pve.example.com:8006/api2/json/",
         "http://pve.example.com, https://pve.example.com:8006/api2/json/",
         "pve.example.com/, https://pve.example.com:8006/api2/json/",
@@ -64,6 +65,21 @@ class ConnectorTest {
         assertThat(
                 Connector.encodePathSegment("UPID:pve:00001234:00ABCDEF:5F000000:qmstart:100:root@pam:"),
                 is("UPID:pve:00001234:00ABCDEF:5F000000:qmstart:100:root@pam:"));
+    }
+
+    @Test
+    void task_ids_of_api_token_users_are_accepted() throws ProxmoxException {
+        // Tasks started with an API token carry the token id after '!'.
+        String upid = "UPID:pve:00001234:00ABCDEF:5F000000:qmstart:100:root@pam!ci:";
+        assertThat(Connector.taskSegment(upid), is(upid));
+        // LDAP or OIDC user ids may contain characters beyond [A-Za-z0-9_-].
+        String ldapUpid = "UPID:pve:00001234:00ABCDEF:5F000000:qmstart:100:john.doe+ci@ldap!token:";
+        assertThat(Connector.taskSegment(ldapUpid), is(ldapUpid));
+        assertThat(
+                Connector.encodePathSegment(ldapUpid),
+                is("UPID:pve:00001234:00ABCDEF:5F000000:qmstart:100:john.doe%2Bci@ldap%21token:"));
+        assertThat(Connector.nodeSegment("pve-node1.local"), is("pve-node1.local"));
+        assertThat(Connector.snapshotSegment("clean_v2-final"), is("clean_v2-final"));
     }
 
     @Test
@@ -125,5 +141,38 @@ class ConnectorTest {
             assertThrows(ProxmoxException.class, () -> connector.stopQemuMachine("pve", 0));
             assertThrows(ProxmoxException.class, () -> connector.rollbackQemuMachineSnapshot("pve", 100, ".."));
         }
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "'   ', ''",
+        "'https://', ''",
+        "'::1', '[::1]'",
+        "'[::1]', '[::1]'",
+        "'[fd00::10]:8007', '[fd00::10]:8007'",
+        "PVE.Example.COM, PVE.Example.COM",
+        "' https://pve.example.com:8006/api2/json/ ', pve.example.com:8006",
+        "pve.example.com:8006/, pve.example.com:8006",
+        "pve.example.com/api2/json?x=1, pve.example.com"
+    })
+    void normalize_host_strips_scheme_path_and_whitespace(String input, String expected) {
+        assertThat(Connector.normalizeHost(input), is(expected));
+    }
+
+    @Test
+    void bracketed_ipv6_host_with_port_keeps_its_port() {
+        try (Connector connector = new Connector("[fd00::10]:8007", "user", "pve", null, false)) {
+            assertThat(connector.baseURL, is("https://[fd00::10]:8007/api2/json/"));
+        }
+    }
+
+    @Test
+    void task_success_is_case_sensitive_and_needs_both_fields() {
+        assertFalse(Connector.isTaskSuccessful(new JSONObject("{\"status\":\"stopped\"}")));
+        assertFalse(Connector.isTaskSuccessful(new JSONObject("{\"exitstatus\":\"OK\"}")));
+        assertFalse(Connector.isTaskSuccessful(new JSONObject("{\"status\":\"STOPPED\",\"exitstatus\":\"OK\"}")));
+        assertFalse(Connector.isTaskSuccessful(new JSONObject("{\"status\":\"stopped\",\"exitstatus\":\"ok\"}")));
+        assertFalse(Connector.isTaskSuccessful(
+                new JSONObject("{\"status\":\"stopped\",\"exitstatus\":\"WARNINGS: 1\"}")));
     }
 }

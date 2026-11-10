@@ -35,13 +35,11 @@ public class Connector implements AutoCloseable {
     static final long DEFAULT_TASK_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
     static final int DEFAULT_PORT = 8006;
     private static final int CONNECT_TIMEOUT_MS = 10 * 1000;
-    private static final int SOCKET_TIMEOUT_MS = 60 * 1000;
+    static final int SOCKET_TIMEOUT_MS = 60 * 1000;
     // Proxmox tickets are valid for 2 hours; renew a bit earlier to avoid races with the expiry.
     static final long TICKET_LIFETIME_MS = 110 * 60 * 1000;
 
-    private final String username;
-    private final String realm;
-    private final Secret password;
+    private final ProxmoxAuth auth;
     final String baseURL;
 
     private volatile Ticket ticket;
@@ -68,6 +66,10 @@ public class Connector implements AutoCloseable {
     }
 
     public Connector(String hostname, String username, String realm, Secret password, Boolean ignoreSSL) {
+        this(hostname, ProxmoxAuth.usernamePassword(username, realm, password), ignoreSSL);
+    }
+
+    public Connector(String hostname, ProxmoxAuth auth, Boolean ignoreSSL) {
         int port = DEFAULT_PORT;
         String host = normalizeHost(hostname);
         try {
@@ -81,9 +83,7 @@ public class Connector implements AutoCloseable {
         } catch (URISyntaxException e) {
             LOGGER.log(Level.WARNING, "Failed to parse hostname URI: " + hostname, e);
         }
-        this.username = username;
-        this.realm = realm;
-        this.password = password;
+        this.auth = auth;
 
         this.unirest = Unirest.spawnInstance();
         unirest.config()
@@ -111,29 +111,35 @@ public class Connector implements AutoCloseable {
         if (pathStart >= 0) {
             host = host.substring(0, pathStart);
         }
+        // A bare IPv6 address needs brackets to be a valid URI host.
+        if (host.indexOf(':') != host.lastIndexOf(':') && !host.startsWith("[")) {
+            host = "[" + host + "]";
+        }
         return host;
     }
 
     // Proxmox's own syntax for node names, snapshot names and task ids (UPIDs).
     private static final Pattern NODE_NAME = Pattern.compile("[A-Za-z0-9][A-Za-z0-9.-]*");
     private static final Pattern SNAPSHOT_NAME = Pattern.compile("[A-Za-z][A-Za-z0-9_-]*");
-    private static final Pattern TASK_ID = Pattern.compile("UPID:[A-Za-z0-9:._@-]+");
+    // UPIDs contain the user id, which may be any non-blank text without ':' or '/', e.g. john.doe+ci@ldap!token.
+    // '/' would act as a path separator on the server even when encoded; everything else is encoded.
+    private static final Pattern TASK_ID = Pattern.compile("UPID:[^\\s/%]+");
 
-    private static String nodeSegment(String node) throws ProxmoxException {
+    static String nodeSegment(String node) throws ProxmoxException {
         if (node == null || !NODE_NAME.matcher(node).matches()) {
             throw new ProxmoxException("Invalid Proxmox node name: '" + node + "'");
         }
         return node;
     }
 
-    private static String snapshotSegment(String snapshotName) throws ProxmoxException {
+    static String snapshotSegment(String snapshotName) throws ProxmoxException {
         if (snapshotName == null || !SNAPSHOT_NAME.matcher(snapshotName).matches()) {
             throw new ProxmoxException("Invalid snapshot name: '" + snapshotName + "'");
         }
         return snapshotName;
     }
 
-    private static String taskSegment(String taskId) throws ProxmoxException {
+    static String taskSegment(String taskId) throws ProxmoxException {
         if (taskId == null || !TASK_ID.matcher(taskId).matches()) {
             throw new ProxmoxException("Invalid Proxmox task id: '" + taskId + "'");
         }
@@ -186,15 +192,38 @@ public class Connector implements AutoCloseable {
         this.taskTimeoutMs = taskTimeoutMs;
     }
 
+    private boolean usesApiToken() {
+        return auth instanceof ProxmoxAuth.ApiToken;
+    }
+
+    /**
+     * Verifies the credentials. With a username and password this obtains an authentication
+     * ticket; an API token needs no login, so it is checked with a request to {@code version}.
+     */
     public synchronized void login() throws LoginException {
+        if (auth == null) {
+            throw new LoginException("No Proxmox credentials configured");
+        }
+        if (usesApiToken()) {
+            ProxmoxAuth.ApiToken token = (ProxmoxAuth.ApiToken) auth;
+            if (!token.isValidFormat()) {
+                throw new LoginException("The API token must have the form user@realm!tokenid=secret");
+            }
+            try {
+                getJSONResource("version");
+            } catch (ProxmoxException e) {
+                throw loginException("API token was rejected: " + e.getMessage(), e);
+            }
+            return;
+        }
+        ProxmoxAuth.UsernamePassword credentials = (ProxmoxAuth.UsernamePassword) auth;
         HttpResponse<JsonNode> response;
         try {
             response = unirest.post(baseURL + "access/ticket")
-                    .field("username", username + "@" + realm)
-                    .field("password", password == null ? "" : password.getPlainText())
+                    .field("username", credentials.getUserAtRealm())
+                    .field("password", credentials.getPlainPassword())
                     .asJson();
         } catch (UnirestException e) {
-            LOGGER.log(Level.WARNING, "Could not connect to Proxmox at " + baseURL, e);
             throw loginException("Could not connect to " + baseURL + ": " + e.getMessage(), e);
         }
         if (!response.isSuccess()) {
@@ -205,7 +234,6 @@ public class Connector implements AutoCloseable {
             ticket = new Ticket(
                     data.getString("ticket"), data.getString("CSRFPreventionToken"), System.currentTimeMillis());
         } catch (RuntimeException e) {
-            LOGGER.log(Level.SEVERE, "Failed reading JSON response", e);
             throw loginException("Failed reading JSON response", e);
         }
     }
@@ -216,7 +244,10 @@ public class Connector implements AutoCloseable {
         return e;
     }
 
-    public synchronized void checkIfAuthTicketIsValid() throws LoginException {
+    private synchronized void checkIfAuthTicketIsValid() throws LoginException {
+        if (usesApiToken()) {
+            return;
+        }
         Ticket current = ticket;
         if (current == null || System.currentTimeMillis() - current.issuedAtMs >= TICKET_LIFETIME_MS) {
             login();
@@ -239,7 +270,7 @@ public class Connector implements AutoCloseable {
             throws LoginException, ProxmoxException {
         Ticket t = validTicket();
         HttpResponse<JsonNode> response = send(requestFactory, t);
-        if (response.getStatus() == 401) {
+        if (response.getStatus() == 401 && !usesApiToken()) {
             // The ticket was revoked or expired early, so log in once more and retry.
             invalidate(t);
             response = send(requestFactory, validTicket());
@@ -258,8 +289,12 @@ public class Connector implements AutoCloseable {
     private HttpResponse<JsonNode> send(Supplier<HttpRequest<?>> requestFactory, Ticket t) throws ProxmoxException {
         try {
             HttpRequest<?> request = requestFactory.get();
-            request.header("Cookie", "PVEAuthCookie=" + t.authTicket);
-            request.header("CSRFPreventionToken", t.csrfPreventionToken);
+            if (usesApiToken()) {
+                request.header("Authorization", ((ProxmoxAuth.ApiToken) auth).getAuthorizationHeader());
+            } else {
+                request.header("Cookie", "PVEAuthCookie=" + t.authTicket);
+                request.header("CSRFPreventionToken", t.csrfPreventionToken);
+            }
             return request.asJson();
         } catch (UnirestException e) {
             throw new ProxmoxException("Could not reach Proxmox at " + baseURL + ": " + e.getMessage(), e);
@@ -341,7 +376,6 @@ public class Connector implements AutoCloseable {
                 return lastTaskStatus;
             }
             if (System.currentTimeMillis() - startTime > taskTimeoutMs) {
-                LOGGER.log(Level.WARNING, "Task " + taskId + " on node " + node + " did not finish in time");
                 throw new ProxmoxException("Task " + taskId + " on node " + node + " did not finish within "
                         + (taskTimeoutMs / 1000) + " seconds");
             }

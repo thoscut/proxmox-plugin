@@ -1,23 +1,37 @@
 package org.jenkinsci.plugins.proxmox;
 
+import com.cloudbees.plugins.credentials.CredentialsMatchers;
+import com.cloudbees.plugins.credentials.CredentialsProvider;
+import com.cloudbees.plugins.credentials.common.StandardCredentials;
+import com.cloudbees.plugins.credentials.common.StandardListBoxModel;
+import com.cloudbees.plugins.credentials.common.StandardUsernamePasswordCredentials;
 import hudson.Extension;
 import hudson.Util;
+import hudson.init.Terminator;
 import hudson.model.Descriptor;
 import hudson.model.Label;
+import hudson.security.ACL;
 import hudson.slaves.Cloud;
 import hudson.slaves.NodeProvisioner;
 import hudson.util.FormValidation;
+import hudson.util.ListBoxModel;
 import hudson.util.Secret;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.security.auth.login.LoginException;
 import jenkins.model.Jenkins;
+import org.jenkinsci.Symbol;
+import org.jenkinsci.plugins.plaincredentials.StringCredentials;
 import org.jenkinsci.plugins.proxmox.pve2api.Connector;
+import org.jenkinsci.plugins.proxmox.pve2api.ConnectorPool;
+import org.jenkinsci.plugins.proxmox.pve2api.ProxmoxAuth;
 import org.jenkinsci.plugins.proxmox.pve2api.ProxmoxException;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.QueryParameter;
@@ -25,6 +39,11 @@ import org.kohsuke.stapler.verb.POST;
 
 /**
  * Represents a Proxmox datacenter.
+ *
+ * <p>Authentication is either done with a Jenkins credential ({@link #getCredentialsId()}: a
+ * username/password credential or a secret text holding a Proxmox API token) or, for
+ * configurations created before credentials were supported, with the username, realm and
+ * password stored directly in the cloud.
  */
 public class Datacenter extends Cloud {
 
@@ -34,23 +53,42 @@ public class Datacenter extends Cloud {
     private final String username;
     private final String realm;
     private final Secret password;
+    private final String credentialsId;
     private final Boolean ignoreSSL;
-    private transient Connector pveConnector;
+
+    /** Credentials are looked up at most this often; see {@link #resolveAuth()}. */
+    static final long AUTH_CACHE_MS = 60 * 1000;
+
+    static final String DEFAULT_REALM = "pve";
+
+    private transient volatile ProxmoxAuth resolvedAuth;
+    private transient volatile long resolvedAuthAtMs;
 
     @DataBoundConstructor
-    public Datacenter(String hostname, String username, String realm, Secret password, Boolean ignoreSSL) {
+    public Datacenter(
+            String hostname, String username, String realm, Secret password, String credentialsId, Boolean ignoreSSL) {
         // Jenkins addresses clouds by name, so every datacenter needs a distinct one.
-        super(cloudName(username, realm, hostname));
+        super(cloudName(hostname, authLabel(username, realm, credentialsId)));
         this.hostname = hostname;
         this.username = username;
         this.realm = realm;
         this.password = password;
+        this.credentialsId = Util.fixEmptyAndTrim(credentialsId);
         this.ignoreSSL = ignoreSSL;
-        this.pveConnector = null;
     }
 
-    static String cloudName(String username, String realm, String hostname) {
-        String raw = "proxmox-" + hostname + "-" + username + "-" + realm;
+    /** @deprecated use {@link #Datacenter(String, String, String, Secret, String, Boolean)} */
+    @Deprecated
+    public Datacenter(String hostname, String username, String realm, Secret password, Boolean ignoreSSL) {
+        this(hostname, username, realm, password, null, ignoreSSL);
+    }
+
+    private static String authLabel(String username, String realm, String credentialsId) {
+        return Util.fixEmptyAndTrim(credentialsId) != null ? credentialsId.trim() : username + "-" + realm;
+    }
+
+    static String cloudName(String hostname, String authLabel) {
+        String raw = "proxmox-" + hostname + "-" + authLabel;
         return raw.replaceAll("[^A-Za-z0-9._-]", "_");
     }
 
@@ -80,12 +118,76 @@ public class Datacenter extends Cloud {
         return password;
     }
 
+    public String getCredentialsId() {
+        return credentialsId;
+    }
+
     public Boolean getIgnoreSSL() {
         return ignoreSSL;
     }
 
+    /**
+     * Identifies this datacenter in agent configurations, so it must stay stable: {@code user@realm - hostname}.
+     * Agents are matched with {@link #findByDescription(String)}.
+     */
     public String getDatacenterDescription() {
-        return username + "@" + realm + " - " + hostname;
+        return userAtRealm() + " - " + hostname;
+    }
+
+    private String userAtRealm() {
+        if (credentialsId == null) {
+            return username + "@" + realm;
+        }
+        try {
+            return resolveAuth().getUserAtRealm();
+        } catch (IllegalStateException e) {
+            // Credential currently unavailable: keep the last known value so agents stay attached,
+            // or use the credential id as a stable placeholder (also when no Jenkins runs, in unit tests).
+            ProxmoxAuth last = resolvedAuth;
+            return last != null ? last.getUserAtRealm() : credentialsId;
+        }
+    }
+
+    /**
+     * Finds the datacenter an agent refers to. Matches the description exactly; if that fails (for
+     * example because the credential's user changed), falls back to the hostname part of the
+     * description when exactly one datacenter has that hostname.
+     *
+     * @return the datacenter or {@code null}
+     */
+    public static Datacenter findByDescription(String description) {
+        if (Util.fixEmptyAndTrim(description) == null) {
+            return null;
+        }
+        Jenkins jenkins = Jenkins.getInstanceOrNull();
+        if (jenkins == null) {
+            return null;
+        }
+        Datacenter byHostname = null;
+        int hostnameMatches = 0;
+        int separator = description.lastIndexOf(" - ");
+        String hostnamePart = separator >= 0 ? description.substring(separator + 3) : null;
+        for (Cloud cloud : jenkins.clouds) {
+            if (!(cloud instanceof Datacenter)) {
+                continue;
+            }
+            Datacenter datacenter = (Datacenter) cloud;
+            if (description.equals(datacenter.getDatacenterDescription())) {
+                return datacenter;
+            }
+            if (hostnamePart != null && hostnamePart.equals(datacenter.getHostname())) {
+                byHostname = datacenter;
+                hostnameMatches++;
+            }
+        }
+        if (hostnameMatches == 1) {
+            LOGGER.log(
+                    Level.FINE,
+                    "No datacenter matches '{0}' exactly; using the only one with that hostname: {1}",
+                    new Object[] {description, byHostname.getDatacenterDescription()});
+            return byHostname;
+        }
+        return null;
     }
 
     @Override
@@ -93,14 +195,92 @@ public class Datacenter extends Cloud {
         return (DescriptorImpl) super.getDescriptor();
     }
 
-    public synchronized Connector proxmoxInstance() {
-        if (pveConnector == null) {
-            pveConnector = new Connector(hostname, username, realm, password, ignoreSSL);
+    /**
+     * Resolves the credentials, caching the result for {@link #AUTH_CACHE_MS}, so dropdowns and
+     * agent launches do not hit the credentials store on every call.
+     *
+     * @throws IllegalStateException if the configured credential does not exist or has an unsupported type
+     */
+    ProxmoxAuth resolveAuth() {
+        if (credentialsId == null) {
+            return ProxmoxAuth.usernamePassword(username, realm, password);
         }
-        return pveConnector;
+        ProxmoxAuth cached = resolvedAuth;
+        if (cached != null && System.currentTimeMillis() - resolvedAuthAtMs < AUTH_CACHE_MS) {
+            return cached;
+        }
+        ProxmoxAuth auth = resolveAuth(username, realm, password, credentialsId);
+        resolvedAuth = auth;
+        resolvedAuthAtMs = System.currentTimeMillis();
+        return auth;
     }
 
-    public List<String> getNodes() {
+    static ProxmoxAuth resolveAuth(String username, String realm, Secret password, String credentialsId) {
+        String id = Util.fixEmptyAndTrim(credentialsId);
+        if (id == null) {
+            return ProxmoxAuth.usernamePassword(username, realm, password);
+        }
+        Jenkins jenkins = Jenkins.getInstanceOrNull();
+        if (jenkins == null) {
+            throw new IllegalStateException("Jenkins is not running, cannot look up credential '" + id + "'");
+        }
+        StandardCredentials credentials = CredentialsMatchers.firstOrNull(
+                CredentialsProvider.lookupCredentialsInItemGroup(
+                        StandardCredentials.class, jenkins, ACL.SYSTEM2, Collections.emptyList()),
+                CredentialsMatchers.withId(id));
+        if (credentials == null) {
+            throw new IllegalStateException("Proxmox credential '" + id + "' not found");
+        }
+        if (credentials instanceof StandardUsernamePasswordCredentials) {
+            StandardUsernamePasswordCredentials c = (StandardUsernamePasswordCredentials) credentials;
+            String effectiveRealm = Util.fixEmptyAndTrim(realm) == null ? DEFAULT_REALM : realm.trim();
+            return ProxmoxAuth.usernamePassword(c.getUsername(), effectiveRealm, c.getPassword());
+        }
+        if (credentials instanceof StringCredentials) {
+            ProxmoxAuth token = ProxmoxAuth.apiToken(((StringCredentials) credentials).getSecret());
+            if (!token.isValidFormat()) {
+                throw new IllegalStateException("Proxmox credential '" + id
+                        + "' is not an API token; expected the form user@realm!tokenid=secret");
+            }
+            return token;
+        }
+        throw new IllegalStateException("Proxmox credential '" + id + "' must be a username/password or a secret text");
+    }
+
+    ConnectorPool.Key connectorKey() {
+        return new ConnectorPool.Key(hostname, resolveAuth(), ignoreSSL);
+    }
+
+    /**
+     * @return the shared connector for this datacenter's configuration
+     * @throws IllegalStateException if the configured credential cannot be resolved
+     */
+    Connector proxmoxInstance() {
+        ConnectorPool.Key own = connectorKey();
+        Set<ConnectorPool.Key> inUse = new HashSet<>();
+        inUse.add(own);
+        Jenkins jenkins = Jenkins.getInstanceOrNull();
+        if (jenkins != null) {
+            for (Cloud cloud : jenkins.clouds) {
+                if (cloud instanceof Datacenter && cloud != this) {
+                    try {
+                        inUse.add(((Datacenter) cloud).connectorKey());
+                    } catch (IllegalStateException e) {
+                        // A datacenter with a broken credential has no connector to keep.
+                    }
+                }
+            }
+        }
+        return ConnectorPool.acquire(own, inUse);
+    }
+
+    /** Closes the shared HTTP clients when Jenkins shuts down. */
+    @Terminator
+    public static void closeConnectors() {
+        ConnectorPool.closeAll();
+    }
+
+    List<String> getNodes() {
         try {
             return proxmoxInstance().getNodes();
         } catch (LoginException | ProxmoxException | RuntimeException e) {
@@ -112,7 +292,7 @@ public class Datacenter extends Cloud {
     /**
      * @return the QEMU virtual machines of a node, keyed and sorted by VM id, with their names as values.
      */
-    public Map<Integer, String> getQemuMachines(String node) {
+    Map<Integer, String> getQemuMachines(String node) {
         if (node == null || node.isEmpty()) {
             return Collections.emptyMap();
         }
@@ -125,7 +305,7 @@ public class Datacenter extends Cloud {
         }
     }
 
-    public List<String> getQemuMachineSnapshots(String node, Integer vmid) {
+    List<String> getQemuMachineSnapshots(String node, Integer vmid) {
         if (node == null || node.isEmpty() || vmid == null || vmid < 1) {
             return new ArrayList<>();
         }
@@ -139,6 +319,7 @@ public class Datacenter extends Cloud {
     }
 
     @Extension
+    @Symbol("datacenter")
     public static final class DescriptorImpl extends Descriptor<Cloud> {
         @Override
         public String getDisplayName() {
@@ -154,20 +335,74 @@ public class Datacenter extends Cloud {
             else return FormValidation.ok();
         }
 
+        @POST
         public FormValidation doCheckHostname(@QueryParameter String value) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+            if (value != null && value.contains("@")) {
+                return FormValidation.error("Hostname must not contain user information; use the fields below");
+            }
             return emptyStringValidation("Hostname", value);
         }
 
-        public FormValidation doCheckUsername(@QueryParameter String value) {
+        @POST
+        public FormValidation doCheckUsername(@QueryParameter String value, @QueryParameter String credentialsId) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+            if (Util.fixEmptyAndTrim(credentialsId) != null) {
+                return FormValidation.ok();
+            }
             return emptyStringValidation("Username", value);
         }
 
-        public FormValidation doCheckRealm(@QueryParameter String value) {
+        @POST
+        public FormValidation doCheckRealm(@QueryParameter String value, @QueryParameter String credentialsId) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+            if (Util.fixEmptyAndTrim(credentialsId) != null) {
+                return FormValidation.ok();
+            }
             return emptyStringValidation("Realm", value);
         }
 
-        public FormValidation doCheckPassword(@QueryParameter Secret value) {
+        @POST
+        public FormValidation doCheckPassword(@QueryParameter Secret value, @QueryParameter String credentialsId) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+            if (Util.fixEmptyAndTrim(credentialsId) != null) {
+                return FormValidation.ok();
+            }
             return emptyStringValidation("Password", value == null ? null : value.getPlainText());
+        }
+
+        @POST
+        public FormValidation doCheckCredentialsId(@QueryParameter String value) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+            if (Util.fixEmptyAndTrim(value) == null) {
+                return FormValidation.warning(
+                        "No credential selected; the username and password fields are used instead.");
+            }
+            try {
+                resolveAuth(null, null, null, value);
+                return FormValidation.ok();
+            } catch (IllegalStateException e) {
+                return FormValidation.error(e.getMessage());
+            }
+        }
+
+        @POST
+        public ListBoxModel doFillCredentialsIdItems(@QueryParameter String credentialsId) {
+            Jenkins jenkins = Jenkins.get();
+            StandardListBoxModel result = new StandardListBoxModel();
+            if (!jenkins.hasPermission(Jenkins.ADMINISTER)) {
+                return result.includeCurrentValue(credentialsId);
+            }
+            return result.includeEmptyValue()
+                    .includeMatchingAs(
+                            ACL.SYSTEM2,
+                            jenkins,
+                            StandardCredentials.class,
+                            Collections.emptyList(),
+                            CredentialsMatchers.anyOf(
+                                    CredentialsMatchers.instanceOf(StandardUsernamePasswordCredentials.class),
+                                    CredentialsMatchers.instanceOf(StringCredentials.class)))
+                    .includeCurrentValue(credentialsId);
         }
 
         @POST
@@ -176,25 +411,36 @@ public class Datacenter extends Cloud {
                 @QueryParameter String username,
                 @QueryParameter String realm,
                 @QueryParameter Secret password,
+                @QueryParameter String credentialsId,
                 @QueryParameter Boolean ignoreSSL) {
             Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             if (Util.fixEmptyAndTrim(hostname) == null) {
                 return fieldNotSpecifiedError("Hostname");
             }
-            if (Util.fixEmptyAndTrim(username) == null) {
-                return fieldNotSpecifiedError("Username");
-            }
-            if (Util.fixEmptyAndTrim(realm) == null) {
-                return fieldNotSpecifiedError("Realm");
-            }
-            if (password == null || password.getPlainText().isEmpty()) {
-                return fieldNotSpecifiedError("Password");
+            boolean useCredential = Util.fixEmptyAndTrim(credentialsId) != null;
+            if (!useCredential) {
+                if (Util.fixEmptyAndTrim(username) == null) {
+                    return fieldNotSpecifiedError("Username");
+                }
+                if (Util.fixEmptyAndTrim(realm) == null) {
+                    return fieldNotSpecifiedError("Realm");
+                }
+                if (password == null || password.getPlainText().isEmpty()) {
+                    return fieldNotSpecifiedError("Password");
+                }
             }
 
-            try (Connector pveConnector =
-                    new Connector(hostname.trim(), username.trim(), realm.trim(), password, ignoreSSL)) {
+            ProxmoxAuth auth;
+            try {
+                auth = resolveAuth(
+                        Util.fixNull(username).trim(), Util.fixNull(realm).trim(), password, credentialsId);
+            } catch (IllegalStateException e) {
+                return FormValidation.error(e.getMessage());
+            }
+
+            try (Connector pveConnector = new Connector(hostname.trim(), auth, ignoreSSL)) {
                 pveConnector.login();
-                return FormValidation.ok("Login successful");
+                return FormValidation.ok("Login successful as " + auth.getUserAtRealm());
             } catch (LoginException e) {
                 LOGGER.log(Level.WARNING, "Proxmox authentication error", e);
                 return FormValidation.error("Authentication error: " + e.getMessage());

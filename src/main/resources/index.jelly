@@ -1,4 +1,5 @@
 <?jelly escape-by-default='true'?>
 <div>
-  Enables proxmox machines to be used as agents. Supports reverting from a snapshot
+  Uses Proxmox VE virtual machines as Jenkins agents: rolls them back to a snapshot and starts
+  them before use, and shuts them down afterwards.
 </div>

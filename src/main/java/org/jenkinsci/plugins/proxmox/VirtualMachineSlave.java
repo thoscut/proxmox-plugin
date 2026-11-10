@@ -82,6 +82,19 @@ public class VirtualMachineSlave extends Slave {
         this.startVM = startVM;
         this.startupWaitingPeriodSeconds = startupWaitingPeriodSeconds;
         this.revertPolicy = revertPolicy;
+        checkExecutorsForRevertPolicy(getNumExecutors(), revertPolicy);
+    }
+
+    /**
+     * Reverting before every job disconnects the agent and rolls the whole VM back, which would
+     * kill any build running on another executor of the same agent.
+     */
+    static void checkExecutorsForRevertPolicy(int numExecutors, RevertPolicy revertPolicy)
+            throws Descriptor.FormException {
+        if (revertPolicy == RevertPolicy.BEFORE_JOB && numExecutors > 1) {
+            throw new Descriptor.FormException(
+                    "The revert policy 'Before every job' requires exactly one executor", "numExecutors");
+        }
     }
 
     public String getDatacenterDescription() {
@@ -143,8 +156,7 @@ public class VirtualMachineSlave extends Slave {
 
     @Override
     public Computer createComputer() {
-        // TODO: Not sure if this is needed, could be able to use this to reset to snapshots
-        // TODO: as a computer is required for a job.
+        // The computer implements the "Before every job" revert in taskAccepted().
         return new VirtualMachineSlaveComputer(this);
     }
 
@@ -153,7 +165,7 @@ public class VirtualMachineSlave extends Slave {
 
         @Override
         public String getDisplayName() {
-            return "Agent virtual machine running on a Proxmox datacenter.";
+            return "Agent virtual machine running on a Proxmox datacenter";
         }
 
         @Override
@@ -180,10 +192,8 @@ public class VirtualMachineSlave extends Slave {
             items.add("[Select]", "");
             for (Cloud cloud : Jenkins.get().clouds) {
                 if (cloud instanceof Datacenter) {
-                    // TODO: Possibly add the `datacenterDescription` as the `displayName` and `value`
-                    // (http://javadoc.jenkins-ci.org/hudson/util/ListBoxModel.html)
-                    // Add by `display name` and then the `value`
-                    items.add(((Datacenter) cloud).getHostname(), ((Datacenter) cloud).getDatacenterDescription());
+                    // Two datacenters on one host (different credentials) must stay distinguishable.
+                    items.add(((Datacenter) cloud).getDatacenterDescription());
                 }
             }
             return items;
@@ -286,15 +296,7 @@ public class VirtualMachineSlave extends Slave {
         }
 
         private Datacenter getDatacenterByDescription(String datacenterDescription) {
-            if (datacenterDescription != null && !datacenterDescription.equals("")) {
-                for (Cloud cloud : Jenkins.get().clouds) {
-                    if (cloud instanceof Datacenter
-                            && datacenterDescription.equals(((Datacenter) cloud).getDatacenterDescription())) {
-                        return (Datacenter) cloud;
-                    }
-                }
-            }
-            return null;
+            return Datacenter.findByDescription(datacenterDescription);
         }
     }
 }

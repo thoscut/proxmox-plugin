@@ -1,14 +1,14 @@
 <?jelly escape-by-default='true'?>
-<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:d="jelly:define" xmlns:l="/lib/layout" xmlns:t="/lib/hudson" xmlns:f="/lib/form" xmlns:sel="/lib/form">
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:d="jelly:define" xmlns:l="/lib/layout" xmlns:t="/lib/hudson" xmlns:f="/lib/form">
     <f:entry title="${%Datacenter}" field="datacenterDescription" help="/plugin/proxmox/help-vm-datacenterDescription.html">
         <f:select/>
     </f:entry>
 
-    <f:entry title="${%Datacenter Node}" field="datacenterNode">
+    <f:entry title="${%Datacenter Node}" field="datacenterNode" help="/plugin/proxmox/help-vm-datacenterNode.html">
         <f:select fillDependsOn="datacenterDescription" />
     </f:entry>
 
-    <f:entry title="${%Virtual Machine}" field="virtualMachineId">
+    <f:entry title="${%Virtual Machine}" field="virtualMachineId" help="/plugin/proxmox/help-vm-virtualMachineId.html">
         <f:select fillDependsOn="datacenterDescription,datacenterNode" />
     </f:entry>
 
@@ -22,7 +22,7 @@
     <f:entry title="${%Start Virtual Machine}" field="startVM" help="/plugin/proxmox/help-vm-startVirtualMachine.html">
         <f:checkbox default="true" />
     </f:entry>
-    
+
     <f:entry title="${%Revert policy}" field="revertPolicy" help="/plugin/proxmox/help-vm-revertPolicy.html">
         <f:enum field="revertPolicy">
             ${it.getLabel()}
@@ -33,15 +33,15 @@
         <f:textbox field="nodeDescription"/>
     </f:entry>
 
-    <f:entry title="${%Startup Idle (sec)}" field="startupWaitingPeriodSeconds" help="/plugin/proxmox/help-vm-waitingPeriod.html">
+    <f:entry title="${%Startup wait (sec)}" field="startupWaitingPeriodSeconds" help="/plugin/proxmox/help-vm-waitingPeriod.html">
         <f:number default="60" clazz="number" min="0" step="1"/>
     </f:entry>
 
-    <f:entry title="${%# of executors}" field="numExecutors">
-        <f:textbox/>
+    <f:entry title="${%Number of executors}" field="numExecutors">
+        <f:number clazz="positive-number-required" min="1" step="1" default="1"/>
     </f:entry>
 
-    <f:entry title="${%Remote FS root}" field="remoteFS">
+    <f:entry title="${%Remote root directory}" field="remoteFS">
         <f:textbox/>
     </f:entry>
 
@@ -51,7 +51,6 @@
 
     <f:slave-mode name="mode" node="${it}"/>
 
-	<j:set var="itDescriptor" value="${descriptor}"/>
     <f:dropdownList name="slave.delegateLauncher" title="${%Secondary launch method}"
                     help="${descriptor.getHelpFile('launcher')}">
         <j:forEach var="d" items="${descriptor.computerLauncherDescriptors(it)}">
@@ -70,25 +69,11 @@
     <!-- pointless to show this if there's only one option, which is the default -->
     <j:set var="retentionStrategies" value="${descriptor.retentionStrategyDescriptors(it)}"/>
     <j:if test="${retentionStrategies.size() gt 1}">
-        <f:dropdownList name="slave.retentionStrategy" title="${%Availability}"
-                        help="/help/system-config/master-slave/availability.html">
-            <j:forEach var="d" items="${retentionStrategies}">
-                <j:if test="${d != null}">
-                    <f:dropdownListBlock value="${d.clazz.name}" name="${d.displayName}"
-                                         selected="${it.retentionStrategy.descriptor==d}"
-                                         title="${d.displayName}">
-                        <j:set var="descriptor" value="${d}"/>
-                        <j:set var="instance"
-                               value="${it.retentionStrategy.descriptor==d ? it.retentionStrategy : null}"/>
-					    <f:class-entry descriptor="${d}" />
-                        <st:include from="${d}" page="${d.configPage}" optional="true"/>
-                    </f:dropdownListBlock>
-                </j:if>
-            </j:forEach>
-        </f:dropdownList>
+        <f:dropdownDescriptorSelector title="${%Availability}" field="retentionStrategy"
+                                      descriptors="${retentionStrategies}"/>
     </j:if>
 
-    <f:descriptorList title="${%Node Properties}" descriptors="${h.getNodePropertyDescriptors(descriptor.clazz)}"
+    <f:descriptorList title="${%Node Properties}" descriptors="${descriptor.nodePropertyDescriptors(it)}"
                       field="nodeProperties"/>
 
 </j:jelly>
