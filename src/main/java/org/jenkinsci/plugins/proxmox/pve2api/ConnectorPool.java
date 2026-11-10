@@ -1,7 +1,9 @@
 package org.jenkinsci.plugins.proxmox.pve2api;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -52,38 +54,76 @@ public final class ConnectorPool {
         }
     }
 
+    /**
+     * A connector whose configuration disappeared may still be used by a launch that started
+     * before, so it is closed only after the longest request sequence can have finished.
+     */
+    static final long RETIRE_GRACE_MS = Connector.DEFAULT_TASK_TIMEOUT_MS + 2 * Connector.SOCKET_TIMEOUT_MS;
+
+    private static final class Retired {
+        final Connector connector;
+        final long retiredAtMs;
+
+        Retired(Connector connector, long retiredAtMs) {
+            this.connector = connector;
+            this.retiredAtMs = retiredAtMs;
+        }
+    }
+
     private static final Map<Key, Connector> CONNECTORS = new HashMap<>();
+    private static final List<Retired> RETIRED = new ArrayList<>();
 
     private ConnectorPool() {}
 
     /**
      * @param key the configuration to connect with
      * @param inUse the configurations of all currently configured datacenters; connectors for
-     *     any other configuration are closed
+     *     any other configuration are retired and closed after a grace period
      * @return the shared connector for {@code key}
      */
     public static synchronized Connector acquire(Key key, Set<Key> inUse) {
+        long now = System.currentTimeMillis();
         Iterator<Map.Entry<Key, Connector>> it = CONNECTORS.entrySet().iterator();
         while (it.hasNext()) {
             Map.Entry<Key, Connector> entry = it.next();
             if (!entry.getKey().equals(key) && !inUse.contains(entry.getKey())) {
-                LOGGER.log(Level.FINE, "Closing unused Proxmox connection to {0}", entry.getKey());
+                LOGGER.log(Level.FINE, "Retiring unused Proxmox connection to {0}", entry.getKey());
                 it.remove();
-                entry.getValue().close();
+                RETIRED.add(new Retired(entry.getValue(), now));
             }
         }
+        closeRetired(now);
         return CONNECTORS.computeIfAbsent(key, k -> new Connector(k.hostname, k.auth, k.ignoreSSL));
     }
 
-    /** Closes every pooled connector; used by tests and on shutdown. */
+    private static void closeRetired(long now) {
+        Iterator<Retired> it = RETIRED.iterator();
+        while (it.hasNext()) {
+            Retired retired = it.next();
+            if (now - retired.retiredAtMs >= RETIRE_GRACE_MS) {
+                it.remove();
+                retired.connector.close();
+            }
+        }
+    }
+
+    /** Closes every pooled and retired connector. Called on Jenkins shutdown and by tests. */
     public static synchronized void closeAll() {
         for (Connector connector : CONNECTORS.values()) {
             connector.close();
         }
         CONNECTORS.clear();
+        for (Retired retired : RETIRED) {
+            retired.connector.close();
+        }
+        RETIRED.clear();
     }
 
     static synchronized int size() {
         return CONNECTORS.size();
+    }
+
+    static synchronized int retiredSize() {
+        return RETIRED.size();
     }
 }

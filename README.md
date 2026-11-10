@@ -29,8 +29,13 @@ Everyone who may configure Jenkins agents can select VMs and snapshots of that a
 
 Authentication uses a Jenkins credential: either a *Username with password* credential
 or a *Secret text* holding a Proxmox API token (`user@realm!tokenid=secret`, recommended).
-Datacenters configured before credentials were supported keep working with the username
-and password stored in the cloud.
+Create the token with *Privilege Separation* enabled and give the token itself only the
+permissions listed above. Datacenters configured before credentials were supported keep
+working with the username and password stored in the cloud.
+
+Agents refer to their datacenter by `user@realm - hostname`. If that no longer matches
+(for example after switching the credential to another user), the agent falls back to the
+only datacenter with the same hostname.
 
 To add a new Proxmox datacenter cloud, go to "Manage Jenkins" > "Clouds",
 click "New cloud" and select "Proxmox Datacenter".

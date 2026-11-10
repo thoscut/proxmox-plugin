@@ -4,7 +4,6 @@ import hudson.Extension;
 import hudson.model.Descriptor;
 import hudson.model.DescriptorVisibilityFilter;
 import hudson.model.TaskListener;
-import hudson.slaves.Cloud;
 import hudson.slaves.ComputerLauncher;
 import hudson.slaves.DelegatingComputerLauncher;
 import hudson.slaves.JNLPLauncher;
@@ -136,16 +135,15 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
     }
 
     public Datacenter findDatacenterInstance() {
+        Datacenter datacenter = null;
         if (datacenterDescription != null && virtualMachineId != null) {
-            for (Cloud cloud : Jenkins.get().clouds) {
-                if (cloud instanceof Datacenter
-                        && datacenterDescription.equals(((Datacenter) cloud).getDatacenterDescription())) {
-                    return (Datacenter) cloud;
-                }
-            }
+            datacenter = Datacenter.findByDescription(datacenterDescription);
         }
-        throw new IllegalStateException("Could not find the proxmox datacenter instance '" + datacenterDescription
-                + "' for virtual machine " + virtualMachineId + "!");
+        if (datacenter == null) {
+            throw new IllegalStateException("Could not find the proxmox datacenter instance '" + datacenterDescription
+                    + "' for virtual machine " + virtualMachineId + "!");
+        }
+        return datacenter;
     }
 
     private Connector connector() throws IOException {

@@ -89,10 +89,15 @@ public abstract class ProxmoxAuth {
             this.token = value;
         }
 
+        /** Shown instead of a user name when the secret is not a token, so the secret itself never leaks. */
+        static final String INVALID_TOKEN = "invalid-token";
+
         @Override
         public String getUserAtRealm() {
-            int bang = token.indexOf('!');
-            return bang > 0 ? token.substring(0, bang) : token;
+            if (!isValidFormat()) {
+                return INVALID_TOKEN;
+            }
+            return token.substring(0, token.indexOf('!'));
         }
 
         /** @return the value of the {@code Authorization} header. */

@@ -10,8 +10,8 @@ import hudson.util.Secret;
 import org.junit.jupiter.api.Test;
 
 /**
- * Unit tests for {@link ProxmoxAuth}. {@link Secret#fromString} keeps plain, non-base64 strings
- * as they are, so it works without a running Jenkins.
+ * Unit tests for {@link ProxmoxAuth}. Without a running Jenkins, {@link Secret#fromString} uses a
+ * mock confidential store and keeps these plain strings as they are.
  */
 class ProxmoxAuthTest {
 
@@ -53,6 +53,15 @@ class ProxmoxAuthTest {
         assertFalse(token("just-a-password").isValidFormat());
         assertFalse(token("jenkins@pve!ci=").isValidFormat());
         assertFalse(((ProxmoxAuth.ApiToken) ProxmoxAuth.apiToken(null)).isValidFormat());
+    }
+
+    @Test
+    void malformed_api_token_never_shows_up_as_user_name() {
+        // A secret text holding a plain password must not leak through descriptions or logs.
+        ProxmoxAuth.ApiToken token = token("just-a-password");
+        assertThat(token.getUserAtRealm(), is(ProxmoxAuth.ApiToken.INVALID_TOKEN));
+        assertThat(token.toString().contains("just-a-password"), is(false));
+        assertThat(token("p!ss").getUserAtRealm(), is(ProxmoxAuth.ApiToken.INVALID_TOKEN));
     }
 
     private static ProxmoxAuth.ApiToken token(String value) {

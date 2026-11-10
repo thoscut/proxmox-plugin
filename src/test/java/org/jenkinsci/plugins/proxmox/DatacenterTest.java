@@ -91,7 +91,13 @@ class DatacenterTest {
     }
 
     @Test
+    void find_by_description_needs_a_running_jenkins() {
+        assertThat(Datacenter.findByDescription("admin@pam - host"), is((Datacenter) null));
+        assertThat(Datacenter.findByDescription(null), is((Datacenter) null));
+    }
+
+    @Test
     void cloud_name_only_contains_url_safe_characters() {
-        assertThat(Datacenter.cloudName("a b", "c/d", "h@st:1"), is("proxmox-h_st_1-a_b-c_d"));
+        assertThat(Datacenter.cloudName("h@st:1", "a b-c/d"), is("proxmox-h_st_1-a_b-c_d"));
     }
 }

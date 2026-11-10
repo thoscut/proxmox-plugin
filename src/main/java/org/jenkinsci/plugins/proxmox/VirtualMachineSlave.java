@@ -286,15 +286,7 @@ public class VirtualMachineSlave extends Slave {
         }
 
         private Datacenter getDatacenterByDescription(String datacenterDescription) {
-            if (datacenterDescription != null && !datacenterDescription.equals("")) {
-                for (Cloud cloud : Jenkins.get().clouds) {
-                    if (cloud instanceof Datacenter
-                            && datacenterDescription.equals(((Datacenter) cloud).getDatacenterDescription())) {
-                        return (Datacenter) cloud;
-                    }
-                }
-            }
-            return null;
+            return Datacenter.findByDescription(datacenterDescription);
         }
     }
 }

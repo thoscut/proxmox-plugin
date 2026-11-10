@@ -20,7 +20,7 @@ class ConnectorPoolTest {
     }
 
     private static ConnectorPool.Key key(String host, String password) {
-        // Plain, non-base64 strings stay plain text in Secret.fromString without a running Jenkins.
+        // Without a running Jenkins, Secret.fromString uses a mock store and keeps these strings plain.
         ProxmoxAuth auth = ProxmoxAuth.usernamePassword("jenkins", "pve", Secret.fromString(password));
         return new ConnectorPool.Key(host, auth, false);
     }
@@ -36,7 +36,7 @@ class ConnectorPoolTest {
     }
 
     @Test
-    void changed_configuration_gets_a_new_connector_and_the_old_one_is_closed() {
+    void changed_configuration_gets_a_new_connector_and_the_old_one_is_retired() {
         ConnectorPool.Key old = key("pve1", "old");
         Connector oldConnector = ConnectorPool.acquire(old, Collections.singleton(old));
 
@@ -45,6 +45,12 @@ class ConnectorPoolTest {
 
         assertThat(newConnector, is(not(sameInstance(oldConnector))));
         assertThat(ConnectorPool.size(), is(1));
+        // A launch may still be using the old connector, so it is closed only after a grace period.
+        assertThat(ConnectorPool.retiredSize(), is(1));
+        assertThat(ConnectorPool.RETIRE_GRACE_MS > Connector.DEFAULT_TASK_TIMEOUT_MS, is(true));
+
+        ConnectorPool.closeAll();
+        assertThat(ConnectorPool.retiredSize(), is(0));
     }
 
     @Test

@@ -7,6 +7,7 @@ import com.cloudbees.plugins.credentials.common.StandardListBoxModel;
 import com.cloudbees.plugins.credentials.common.StandardUsernamePasswordCredentials;
 import hudson.Extension;
 import hudson.Util;
+import hudson.init.Terminator;
 import hudson.model.Descriptor;
 import hudson.model.Label;
 import hudson.security.ACL;
@@ -54,6 +55,14 @@ public class Datacenter extends Cloud {
     private final String credentialsId;
     private final Boolean ignoreSSL;
 
+    /** Credentials are looked up at most this often; see {@link #resolveAuth()}. */
+    static final long AUTH_CACHE_MS = 60 * 1000;
+
+    static final String DEFAULT_REALM = "pve";
+
+    private transient volatile ProxmoxAuth resolvedAuth;
+    private transient volatile long resolvedAuthAtMs;
+
     @DataBoundConstructor
     public Datacenter(
             String hostname, String username, String realm, Secret password, String credentialsId, Boolean ignoreSSL) {
@@ -80,10 +89,6 @@ public class Datacenter extends Cloud {
     static String cloudName(String hostname, String authLabel) {
         String raw = "proxmox-" + hostname + "-" + authLabel;
         return raw.replaceAll("[^A-Za-z0-9._-]", "_");
-    }
-
-    static String cloudName(String username, String realm, String hostname) {
-        return cloudName(hostname, authLabel(username, realm, null));
     }
 
     @Override
@@ -122,6 +127,7 @@ public class Datacenter extends Cloud {
 
     /**
      * Identifies this datacenter in agent configurations, so it must stay stable: {@code user@realm - hostname}.
+     * Agents are matched with {@link #findByDescription(String)}.
      */
     public String getDatacenterDescription() {
         return userAtRealm() + " - " + hostname;
@@ -134,9 +140,53 @@ public class Datacenter extends Cloud {
         try {
             return resolveAuth().getUserAtRealm();
         } catch (IllegalStateException e) {
-            // Credential missing (or no Jenkins, in unit tests): fall back to a stable placeholder.
-            return credentialsId;
+            // Credential currently unavailable: keep the last known value so agents stay attached,
+            // or use the credential id as a stable placeholder (also when no Jenkins runs, in unit tests).
+            ProxmoxAuth last = resolvedAuth;
+            return last != null ? last.getUserAtRealm() : credentialsId;
         }
+    }
+
+    /**
+     * Finds the datacenter an agent refers to. Matches the description exactly; if that fails (for
+     * example because the credential's user changed), falls back to the hostname part of the
+     * description when exactly one datacenter has that hostname.
+     *
+     * @return the datacenter or {@code null}
+     */
+    public static Datacenter findByDescription(String description) {
+        if (Util.fixEmptyAndTrim(description) == null) {
+            return null;
+        }
+        Jenkins jenkins = Jenkins.getInstanceOrNull();
+        if (jenkins == null) {
+            return null;
+        }
+        Datacenter byHostname = null;
+        int hostnameMatches = 0;
+        int separator = description.lastIndexOf(" - ");
+        String hostnamePart = separator >= 0 ? description.substring(separator + 3) : null;
+        for (Cloud cloud : jenkins.clouds) {
+            if (!(cloud instanceof Datacenter)) {
+                continue;
+            }
+            Datacenter datacenter = (Datacenter) cloud;
+            if (description.equals(datacenter.getDatacenterDescription())) {
+                return datacenter;
+            }
+            if (hostnamePart != null && hostnamePart.equals(datacenter.getHostname())) {
+                byHostname = datacenter;
+                hostnameMatches++;
+            }
+        }
+        if (hostnameMatches == 1) {
+            LOGGER.log(
+                    Level.INFO,
+                    "No datacenter matches '{0}' exactly; using the only one with that hostname: {1}",
+                    new Object[] {description, byHostname.getDatacenterDescription()});
+            return byHostname;
+        }
+        return null;
     }
 
     @Override
@@ -145,10 +195,23 @@ public class Datacenter extends Cloud {
     }
 
     /**
+     * Resolves the credentials, caching the result for {@link #AUTH_CACHE_MS}, so dropdowns and
+     * agent launches do not hit the credentials store on every call.
+     *
      * @throws IllegalStateException if the configured credential does not exist or has an unsupported type
      */
     ProxmoxAuth resolveAuth() {
-        return resolveAuth(username, realm, password, credentialsId);
+        if (credentialsId == null) {
+            return ProxmoxAuth.usernamePassword(username, realm, password);
+        }
+        ProxmoxAuth cached = resolvedAuth;
+        if (cached != null && System.currentTimeMillis() - resolvedAuthAtMs < AUTH_CACHE_MS) {
+            return cached;
+        }
+        ProxmoxAuth auth = resolveAuth(username, realm, password, credentialsId);
+        resolvedAuth = auth;
+        resolvedAuthAtMs = System.currentTimeMillis();
+        return auth;
     }
 
     static ProxmoxAuth resolveAuth(String username, String realm, Secret password, String credentialsId) {
@@ -169,10 +232,16 @@ public class Datacenter extends Cloud {
         }
         if (credentials instanceof StandardUsernamePasswordCredentials) {
             StandardUsernamePasswordCredentials c = (StandardUsernamePasswordCredentials) credentials;
-            return ProxmoxAuth.usernamePassword(c.getUsername(), realm, c.getPassword());
+            String effectiveRealm = Util.fixEmptyAndTrim(realm) == null ? DEFAULT_REALM : realm.trim();
+            return ProxmoxAuth.usernamePassword(c.getUsername(), effectiveRealm, c.getPassword());
         }
         if (credentials instanceof StringCredentials) {
-            return ProxmoxAuth.apiToken(((StringCredentials) credentials).getSecret());
+            ProxmoxAuth token = ProxmoxAuth.apiToken(((StringCredentials) credentials).getSecret());
+            if (!token.isValidFormat()) {
+                throw new IllegalStateException("Proxmox credential '" + id
+                        + "' is not an API token; expected the form user@realm!tokenid=secret");
+            }
+            return token;
         }
         throw new IllegalStateException("Proxmox credential '" + id + "' must be a username/password or a secret text");
     }
@@ -186,11 +255,13 @@ public class Datacenter extends Cloud {
      * @throws IllegalStateException if the configured credential cannot be resolved
      */
     public Connector proxmoxInstance() {
+        ConnectorPool.Key own = connectorKey();
         Set<ConnectorPool.Key> inUse = new HashSet<>();
+        inUse.add(own);
         Jenkins jenkins = Jenkins.getInstanceOrNull();
         if (jenkins != null) {
             for (Cloud cloud : jenkins.clouds) {
-                if (cloud instanceof Datacenter) {
+                if (cloud instanceof Datacenter && cloud != this) {
                     try {
                         inUse.add(((Datacenter) cloud).connectorKey());
                     } catch (IllegalStateException e) {
@@ -199,7 +270,13 @@ public class Datacenter extends Cloud {
                 }
             }
         }
-        return ConnectorPool.acquire(connectorKey(), inUse);
+        return ConnectorPool.acquire(own, inUse);
+    }
+
+    /** Closes the shared HTTP clients when Jenkins shuts down. */
+    @Terminator
+    public static void closeConnectors() {
+        ConnectorPool.closeAll();
     }
 
     public List<String> getNodes() {
@@ -269,7 +346,12 @@ public class Datacenter extends Cloud {
             return emptyStringValidation("Username", value);
         }
 
-        public FormValidation doCheckRealm(@QueryParameter String value) {
+        @POST
+        public FormValidation doCheckRealm(@QueryParameter String value, @QueryParameter String credentialsId) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+            if (Util.fixEmptyAndTrim(credentialsId) != null) {
+                return FormValidation.ok();
+            }
             return emptyStringValidation("Realm", value);
         }
 

@@ -35,7 +35,7 @@ public class Connector implements AutoCloseable {
     static final long DEFAULT_TASK_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
     static final int DEFAULT_PORT = 8006;
     private static final int CONNECT_TIMEOUT_MS = 10 * 1000;
-    private static final int SOCKET_TIMEOUT_MS = 60 * 1000;
+    static final int SOCKET_TIMEOUT_MS = 60 * 1000;
     // Proxmox tickets are valid for 2 hours; renew a bit earlier to avoid races with the expiry.
     static final long TICKET_LIFETIME_MS = 110 * 60 * 1000;
 
@@ -184,10 +184,6 @@ public class Connector implements AutoCloseable {
     /** Only for tests, which cannot wait ten minutes for a task to time out. */
     void setTaskTimeoutMs(long taskTimeoutMs) {
         this.taskTimeoutMs = taskTimeoutMs;
-    }
-
-    public ProxmoxAuth getAuth() {
-        return auth;
     }
 
     private boolean usesApiToken() {
