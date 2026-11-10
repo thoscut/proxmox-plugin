@@ -236,8 +236,7 @@ public class Datacenter extends Cloud {
             return ProxmoxAuth.usernamePassword(c.getUsername(), effectiveRealm, c.getPassword());
         }
         if (credentials instanceof StringCredentials) {
-            ProxmoxAuth.ApiToken token =
-                    (ProxmoxAuth.ApiToken) ProxmoxAuth.apiToken(((StringCredentials) credentials).getSecret());
+            ProxmoxAuth token = ProxmoxAuth.apiToken(((StringCredentials) credentials).getSecret());
             if (!token.isValidFormat()) {
                 throw new IllegalStateException("Proxmox credential '" + id
                         + "' is not an API token; expected the form user@realm!tokenid=secret");

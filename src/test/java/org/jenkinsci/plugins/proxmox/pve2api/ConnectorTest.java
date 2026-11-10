@@ -74,7 +74,6 @@ class ConnectorTest {
         assertThat(Connector.nodeSegment("pve-node1.local"), is("pve-node1.local"));
         assertThat(Connector.snapshotSegment("clean_v2-final"), is("clean_v2-final"));
     }
-    }
 
     @Test
     void path_segments_cannot_change_the_endpoint() throws ProxmoxException {

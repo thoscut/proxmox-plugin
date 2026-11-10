@@ -23,6 +23,14 @@ public abstract class ProxmoxAuth {
     abstract String cacheKey();
 
     /**
+     * @return whether the secret has the shape this kind of credential needs; always {@code true}
+     *     for a username and password, and {@code user@realm!tokenid=secret} for an API token
+     */
+    public boolean isValidFormat() {
+        return true;
+    }
+
+    /**
      * @param username the Proxmox user, optionally already including the realm ({@code root@pam})
      * @param realm the realm to use when {@code username} does not contain one
      */
@@ -105,7 +113,8 @@ public abstract class ProxmoxAuth {
             return PREFIX + token;
         }
 
-        boolean isValidFormat() {
+        @Override
+        public boolean isValidFormat() {
             int bang = token.indexOf('!');
             int eq = token.indexOf('=');
             return bang > 0 && eq > bang + 1 && eq < token.length() - 1 && token.indexOf('@') > 0;
