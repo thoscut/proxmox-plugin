@@ -117,23 +117,24 @@ public class Connector implements AutoCloseable {
     // Proxmox's own syntax for node names, snapshot names and task ids (UPIDs).
     private static final Pattern NODE_NAME = Pattern.compile("[A-Za-z0-9][A-Za-z0-9.-]*");
     private static final Pattern SNAPSHOT_NAME = Pattern.compile("[A-Za-z][A-Za-z0-9_-]*");
-    private static final Pattern TASK_ID = Pattern.compile("UPID:[A-Za-z0-9:._@-]+");
+    // UPIDs of tasks started with an API token contain the token id: ...:root@pam!jenkins:
+    private static final Pattern TASK_ID = Pattern.compile("UPID:[A-Za-z0-9:._@!-]+");
 
-    private static String nodeSegment(String node) throws ProxmoxException {
+    static String nodeSegment(String node) throws ProxmoxException {
         if (node == null || !NODE_NAME.matcher(node).matches()) {
             throw new ProxmoxException("Invalid Proxmox node name: '" + node + "'");
         }
         return node;
     }
 
-    private static String snapshotSegment(String snapshotName) throws ProxmoxException {
+    static String snapshotSegment(String snapshotName) throws ProxmoxException {
         if (snapshotName == null || !SNAPSHOT_NAME.matcher(snapshotName).matches()) {
             throw new ProxmoxException("Invalid snapshot name: '" + snapshotName + "'");
         }
         return snapshotName;
     }
 
-    private static String taskSegment(String taskId) throws ProxmoxException {
+    static String taskSegment(String taskId) throws ProxmoxException {
         if (taskId == null || !TASK_ID.matcher(taskId).matches()) {
             throw new ProxmoxException("Invalid Proxmox task id: '" + taskId + "'");
         }

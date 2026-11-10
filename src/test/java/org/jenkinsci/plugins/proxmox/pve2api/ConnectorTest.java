@@ -67,6 +67,16 @@ class ConnectorTest {
     }
 
     @Test
+    void task_ids_of_api_token_users_are_accepted() throws ProxmoxException {
+        // Tasks started with an API token carry the token id after '!'.
+        String upid = "UPID:pve:00001234:00ABCDEF:5F000000:qmstart:100:root@pam!ci:";
+        assertThat(Connector.taskSegment(upid), is(upid));
+        assertThat(Connector.nodeSegment("pve-node1.local"), is("pve-node1.local"));
+        assertThat(Connector.snapshotSegment("clean_v2-final"), is("clean_v2-final"));
+    }
+    }
+
+    @Test
     void path_segments_cannot_change_the_endpoint() throws ProxmoxException {
         assertThat(Connector.encodePathSegment("pve/qemu/999/status/stop?"), is("pve%2Fqemu%2F999%2Fstatus%2Fstop%3F"));
         assertThat(Connector.encodePathSegment("a#b c%"), is("a%23b%20c%25"));
