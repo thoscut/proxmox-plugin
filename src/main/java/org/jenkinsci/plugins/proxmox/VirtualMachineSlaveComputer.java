@@ -14,9 +14,12 @@ import java.io.IOException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class VirtualMachineSlaveComputer extends AbstractCloudComputer<VirtualMachineSlave> implements TrackedItem {
 
+    private static final Logger LOGGER = Logger.getLogger(VirtualMachineSlaveComputer.class.getName());
     private AtomicBoolean isRevertingSnapshot = new AtomicBoolean(false);
     private final VirtualMachineSlave slave;
 
@@ -116,7 +119,7 @@ public class VirtualMachineSlaveComputer extends AbstractCloudComputer<VirtualMa
                 
             } catch (Exception e) {
                 getListener().getLogger().println("ERROR: BEFORE_JOB snapshot revert failed: " + e.getMessage());
-                e.printStackTrace();
+                LOGGER.log(Level.WARNING, "BEFORE_JOB snapshot revert failed", e);
                 // Continue with job execution even if revert fails
             } finally {
                 isRevertingSnapshot.set(false);

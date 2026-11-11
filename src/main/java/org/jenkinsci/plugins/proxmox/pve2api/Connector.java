@@ -11,10 +11,8 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.security.auth.login.LoginException;
 import kong.unirest.HttpRequest;
-import kong.unirest.HttpRequestWithBody;
 import kong.unirest.HttpResponse;
 import kong.unirest.JsonNode;
-import kong.unirest.MultipartBody;
 import kong.unirest.Unirest;
 import kong.unirest.UnirestInstance;
 import kong.unirest.json.JSONArray;
@@ -51,7 +49,7 @@ public class Connector {
                 port = uri.getPort();
             }
         } catch (URISyntaxException e) {
-            e.printStackTrace();
+            LOGGER.log(Level.WARNING, "Failed to parse hostname for port information: " + hostname, e);
         }
         this.username = username;
         this.realm = realm;

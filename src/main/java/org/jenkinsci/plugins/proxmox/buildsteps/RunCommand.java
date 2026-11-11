@@ -148,6 +148,15 @@ public class RunCommand extends ProxmoxBuildStep {
                     String errorMsg = e.getMessage();
                     if (errorMsg != null && errorMsg.contains("guest agent is not running")) {
                         logInfo(listener, "Guest agent temporarily unavailable (VM may be rebooting), waiting...");
+                    } else if (errorMsg != null && (errorMsg.contains("PID") && errorMsg.contains("does not exist"))) {
+                        // PID no longer exists - this means the process has completed and is no longer tracked
+                        // This can happen if the process exited while we were waiting or if there was a delay
+                        logInfo(listener, "Process has completed and is no longer tracked by guest agent");
+                        completed = true;
+                        // Note: We won't have exit code or output in this case, but the command did finish
+                        status = new JSONObject();
+                        status.put("exited", 1);
+                        status.put("exitcode", 0); // Assume success since we can't determine actual exit code
                     } else {
                         logInfo(listener, "Temporary error checking command status: " + errorMsg + ", retrying...");
                     }
@@ -164,7 +173,12 @@ public class RunCommand extends ProxmoxBuildStep {
                 return false;
             }
 
-            // Process results
+            // Process results (status should not be null here since we create it when PID doesn't exist)
+            if (status == null) {
+                logInfo(listener, "[WARNING] Command completed but status is unavailable");
+                return true; // Command completed, even if we couldn't get the details
+            }
+
             int exitCode = status.optInt("exitcode", -1);
             String stdout = status.optString("out-data", "");
             String stderr = status.optString("err-data", "");

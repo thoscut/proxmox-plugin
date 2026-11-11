@@ -285,10 +285,10 @@ public class VirtualMachineSlave extends AbstractCloudSlave implements TrackedIt
             items.add("[Select]", "");
             for (Cloud cloud : Jenkins.get().clouds) {
                 if (cloud instanceof Datacenter) {
-                    // TODO: Possibly add the `datacenterDescription` as the `displayName` and `value`
-                    // (http://javadoc.jenkins-ci.org/hudson/util/ListBoxModel.html)
-                    // Add by `display name` and then the `value`
-                    items.add(((Datacenter) cloud).getHostname(), ((Datacenter) cloud).getDatacenterDescription());
+                    // Use datacenterDescription for both display name and value for better UX
+                    // Format: "username@realm - hostname" which is more descriptive than hostname alone
+                    String description = ((Datacenter) cloud).getDatacenterDescription();
+                    items.add(description, description);
                 }
             }
             return items;

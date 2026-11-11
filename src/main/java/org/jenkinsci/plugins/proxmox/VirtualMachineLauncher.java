@@ -131,10 +131,11 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
 
     @Override
     public boolean isLaunchSupported() {
-        // TODO: Add this into the settings for node setup
         boolean overrideLaunchSupported = launcher.isLaunchSupported();
-        // Support launching for the JNLPLauncher, so the `launch` function gets called
-        // and the VM can be reset to a snapshot.
+        // Override for JNLPLauncher to ensure the launch() method gets called,
+        // which is necessary for snapshot revert functionality and VM startup.
+        // JNLPLauncher normally returns false (agent connects to controller),
+        // but we need launch() to be called to handle VM lifecycle operations.
         if (launcher instanceof JNLPLauncher) {
             overrideLaunchSupported = true;
         }
