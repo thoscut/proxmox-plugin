@@ -8,8 +8,6 @@ import com.cloudbees.plugins.credentials.impl.UsernamePasswordCredentialsImpl;
 import hudson.model.Node;
 import hudson.slaves.JNLPLauncher;
 import hudson.slaves.RetentionStrategy;
-import hudson.util.Secret;
-import org.jenkinsci.plugins.proxmox.pve2api.MockProxmoxConnector;
 import org.jvnet.hudson.test.JenkinsRule;
 
 import java.util.Collections;
@@ -66,49 +64,6 @@ public class TestUtilities {
             90,
             null
         );
-    }
-
-    /**
-     * Creates a mock Proxmox connector for testing.
-     */
-    public static MockProxmoxConnector createMockConnector() {
-        return new MockProxmoxConnector(
-            "test-proxmox.local",
-            "jenkins",
-            "pam",
-            Secret.fromString("test-password"),
-            true
-        );
-    }
-
-    /**
-     * Creates a mock Proxmox connector with custom configuration.
-     */
-    public static MockProxmoxConnector createMockConnector(String hostname, String username,
-                                                          String realm, String password) {
-        return new MockProxmoxConnector(
-            hostname,
-            username,
-            realm,
-            Secret.fromString(password),
-            true
-        );
-    }
-
-    /**
-     * Sets up test VMs in the mock connector.
-     */
-    public static void setupTestVMs(MockProxmoxConnector connector) {
-        // Add template VM
-        MockProxmoxConnector.MockVM template = connector.addVM("pve-node1", 100, "ubuntu-template", "stopped");
-        template.setTemplate(true);
-        template.addSnapshot("base-snapshot", "Base snapshot for cloning", true);
-
-        // Add running VM
-        connector.addVM("pve-node1", 101, "test-vm-1", "running");
-
-        // Add stopped VM
-        connector.addVM("pve-node2", 102, "test-vm-2", "stopped");
     }
 
     /**
