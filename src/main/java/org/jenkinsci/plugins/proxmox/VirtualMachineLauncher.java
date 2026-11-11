@@ -366,9 +366,12 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
 
     @Override
     public void beforeDisconnect(SlaveComputer slaveComputer, TaskListener taskListener) {
-        if (effectiveRevertPolicy() == RevertPolicy.AFTER_CONNECT) shutdown(slaveComputer, taskListener);
-
-        super.beforeDisconnect(slaveComputer, taskListener);
+        try {
+            if (effectiveRevertPolicy() == RevertPolicy.AFTER_CONNECT) shutdown(slaveComputer, taskListener);
+        } finally {
+            // The delegate must be told even if shutting the virtual machine down fails unexpectedly.
+            super.beforeDisconnect(slaveComputer, taskListener);
+        }
     }
 
     /**

@@ -72,6 +72,24 @@ public class Connector implements AutoCloseable {
     }
 
     public Connector(String hostname, ProxmoxAuth auth, Boolean ignoreSSL) {
+        this(auth, baseUrlOf(hostname), !Boolean.TRUE.equals(ignoreSSL));
+    }
+
+    private Connector(ProxmoxAuth auth, String baseURL, boolean verifySsl) {
+        this.auth = auth;
+
+        this.unirest = Unirest.spawnInstance();
+        unirest.config().verifySsl(verifySsl).connectTimeout(CONNECT_TIMEOUT_MS).socketTimeout(SOCKET_TIMEOUT_MS);
+
+        this.baseURL = baseURL;
+    }
+
+    /** Only for tests, which talk to a local stub of the Proxmox API over plain HTTP. */
+    static Connector forBaseUrl(String baseURL, ProxmoxAuth auth) {
+        return new Connector(auth, baseURL, true);
+    }
+
+    private static String baseUrlOf(String hostname) {
         int port = DEFAULT_PORT;
         String host = normalizeHost(hostname);
         try {
@@ -85,15 +103,7 @@ public class Connector implements AutoCloseable {
         } catch (URISyntaxException e) {
             LOGGER.log(Level.WARNING, "Failed to parse hostname URI: " + hostname, e);
         }
-        this.auth = auth;
-
-        this.unirest = Unirest.spawnInstance();
-        unirest.config()
-                .verifySsl(!Boolean.TRUE.equals(ignoreSSL))
-                .connectTimeout(CONNECT_TIMEOUT_MS)
-                .socketTimeout(SOCKET_TIMEOUT_MS);
-
-        this.baseURL = "https://" + host + ":" + port + "/api2/json/";
+        return "https://" + host + ":" + port + "/api2/json/";
     }
 
     /**
