@@ -1,0 +1,27 @@
+<div>
+    <p>
+        The snapshot name to use when cloning VMs from the template.
+    </p>
+    <p>
+        <strong>Benefits of Using Snapshots:</strong>
+    </p>
+    <ul>
+        <li>Faster VM cloning (especially with linked clones)</li>
+        <li>Consistent state for all cloned agents</li>
+        <li>Easy template updates without affecting running agents</li>
+    </ul>
+    <p>
+        <strong>Recommendations:</strong>
+    </p>
+    <ul>
+        <li>Create a snapshot after fully configuring your template VM</li>
+        <li>Use descriptive snapshot names (e.g., <code>base-snapshot</code>, <code>jenkins-ready</code>)</li>
+        <li>Include VM memory state in the snapshot for faster boot times</li>
+        <li>Update the snapshot when you make changes to the template</li>
+    </ul>
+    <p>
+        <strong>Linked Clones:</strong> If you enable linked clones, the snapshot is mandatory.
+        Linked clones reference the snapshot's disk images instead of creating full copies,
+        saving storage space and speeding up provisioning.
+    </p>
+</div>

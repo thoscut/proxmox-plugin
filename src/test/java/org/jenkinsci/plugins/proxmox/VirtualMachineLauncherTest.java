@@ -47,11 +47,13 @@ class VirtualMachineLauncherTest {
 
     @Test
     void revert_policy_enum_values() {
-        assertThat(RevertPolicy.values().length, is(2));
+        assertThat(RevertPolicy.values().length, is(4));
         assertThat(RevertPolicy.AFTER_CONNECT, is(notNullValue()));
         assertThat(RevertPolicy.BEFORE_JOB, is(notNullValue()));
         assertThat(RevertPolicy.AFTER_CONNECT.getLabel(), is("After connect to the virtual machine"));
         assertThat(RevertPolicy.BEFORE_JOB.getLabel(), is("Before every job executing on the virtual machine"));
+        assertThat(RevertPolicy.AFTER_JOB.getLabel(), is("After every job executing on the virtual machine"));
+        assertThat(RevertPolicy.NEVER.getLabel(), is("Never revert"));
     }
 
     @Test

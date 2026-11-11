@@ -1,0 +1,29 @@
+<div>
+    <p>
+        Space-separated list of labels to assign to agents created from this template.
+    </p>
+    <p>
+        <strong>Purpose:</strong> Labels allow you to target specific agents for your Jenkins jobs.
+        Jobs can restrict where they run by specifying label expressions.
+    </p>
+    <p>
+        <strong>Examples:</strong>
+    </p>
+    <ul>
+        <li><code>linux docker</code> - For Linux agents with Docker installed</li>
+        <li><code>windows dotnet</code> - For Windows agents with .NET framework</li>
+        <li><code>ubuntu-22.04 java-17 maven</code> - Specific OS and tools</li>
+    </ul>
+    <p>
+        <strong>Best Practices:</strong>
+    </p>
+    <ul>
+        <li>Use lowercase for consistency</li>
+        <li>Include OS, language runtimes, and tools</li>
+        <li>Be specific but not overly restrictive</li>
+        <li>Use hyphens within multi-word labels (e.g., <code>ubuntu-22.04</code>)</li>
+    </ul>
+    <p>
+        <strong>Note:</strong> All agents provisioned from this template will have these labels.
+    </p>
+</div>

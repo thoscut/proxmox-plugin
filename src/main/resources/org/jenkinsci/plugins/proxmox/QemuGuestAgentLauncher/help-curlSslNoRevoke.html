@@ -1,0 +1,40 @@
+<div>
+    <p>
+        Add the <code>--ssl-no-revoke</code> flag to curl commands in the generated agent startup script.
+    </p>
+    <p>
+        <strong>Windows-Specific Option:</strong> This flag is primarily for Windows environments where
+        curl may fail when it cannot check SSL certificate revocation lists.
+    </p>
+    <p>
+        <strong>When to Enable:</strong>
+    </p>
+    <ul>
+        <li>Windows agents experiencing SSL certificate revocation check failures</li>
+        <li>Environments without internet access for revocation list downloads</li>
+        <li>Air-gapped or isolated networks</li>
+        <li>Corporate networks with SSL inspection/proxies</li>
+    </ul>
+    <p>
+        <strong>When NOT to Enable:</strong>
+    </p>
+    <ul>
+        <li>Linux/Unix agents (this flag is Windows-specific)</li>
+        <li>Production environments with proper certificate infrastructure</li>
+        <li>When security compliance requires revocation checking</li>
+    </ul>
+    <p>
+        <strong style="color: #d04437;">⚠️ Security Warning:</strong> Disabling revocation checks means
+        curl will not verify if SSL certificates have been revoked. This reduces security and should only
+        be used when necessary.
+    </p>
+    <p>
+        <strong>Better Alternative:</strong> Instead of disabling revocation checks, configure your
+        network to allow access to certificate revocation lists (CRLs/OCSP), or use an internal
+        certificate authority with proper revocation infrastructure.
+    </p>
+    <p>
+        <strong>Note:</strong> This only applies when using the auto-generated agent command.
+        If you provide a custom agent command, you must add this flag manually if needed.
+    </p>
+</div>

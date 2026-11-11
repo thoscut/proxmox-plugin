@@ -1,0 +1,16 @@
+<div>
+    <p>
+        Enable WebSocket transport for the Jenkins agent connection.
+    </p>
+    <p>
+        <strong>Recommended:</strong> Enable this option for better performance and compatibility with modern Jenkins setups.
+    </p>
+    <p>
+        WebSocket provides more reliable agent connections, especially in environments with firewalls or load balancers.
+        If disabled, the agent will use the traditional TCP-based JNLP protocol.
+    </p>
+    <p>
+        <strong>Note:</strong> This setting only applies when using the default agent command.
+        If you specify a custom agent command, you need to manually add or remove the <code>-webSocket</code> flag.
+    </p>
+</div>

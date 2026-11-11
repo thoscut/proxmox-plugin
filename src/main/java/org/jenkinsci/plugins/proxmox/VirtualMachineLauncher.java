@@ -41,7 +41,9 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
 
     public enum RevertPolicy {
         AFTER_CONNECT("After connect to the virtual machine"),
-        BEFORE_JOB("Before every job executing on the virtual machine");
+        BEFORE_JOB("Before every job executing on the virtual machine"),
+        AFTER_JOB("After every job executing on the virtual machine"),
+        NEVER("Never revert");
 
         private final String label;
 
@@ -295,8 +297,11 @@ public class VirtualMachineLauncher extends DelegatingComputerLauncher {
     @Override
     public void launch(SlaveComputer slaveComputer, TaskListener taskListener)
             throws IOException, InterruptedException {
-        if (effectiveRevertPolicy() == RevertPolicy.AFTER_CONNECT) {
+        RevertPolicy policy = effectiveRevertPolicy();
+        if (policy == RevertPolicy.AFTER_CONNECT) {
             revertSnapshot(slaveComputer, taskListener);
+        } else if (policy == RevertPolicy.NEVER) {
+            // The virtual machine is managed elsewhere (for example a clone that the cloud just started).
         } else if (Boolean.TRUE.equals(startVM) && startSlaveIfNeeded(taskListener)) {
             // The guest was just powered on; give it time to boot (or, inbound, to connect back).
             waitForVirtualMachine(slaveComputer, taskListener);

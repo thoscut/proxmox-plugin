@@ -3,9 +3,11 @@ package org.jenkinsci.plugins.proxmox.pve2api;
 import hudson.util.Secret;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.function.Supplier;
@@ -277,13 +279,31 @@ public class Connector implements AutoCloseable {
         }
         if (!response.isSuccess()) {
             throw new ProxmoxException("Proxmox API request '" + apiUrl + "' failed with HTTP " + response.getStatus()
-                    + " " + response.getStatusText());
+                    + " " + response.getStatusText() + errorDetail(response));
         }
         JsonNode body = response.getBody();
         if (body == null || body.getObject() == null) {
             throw new ProxmoxException("Proxmox API request '" + apiUrl + "' returned no JSON object");
         }
         return body;
+    }
+
+    /**
+     * Proxmox explains most errors in the status line, but some (for example of the guest agent)
+     * only in the {@code message} attribute of the body.
+     */
+    private static String errorDetail(HttpResponse<JsonNode> response) {
+        try {
+            JsonNode body = response.getBody();
+            if (body == null || body.getObject() == null) {
+                return "";
+            }
+            String message = body.getObject().optString("message", "").trim();
+            String statusText = response.getStatusText() == null ? "" : response.getStatusText();
+            return message.isEmpty() || statusText.contains(message) ? "" : " (" + message + ")";
+        } catch (RuntimeException e) {
+            return "";
+        }
     }
 
     private HttpResponse<JsonNode> send(Supplier<HttpRequest<?>> requestFactory, Ticket t) throws ProxmoxException {
@@ -309,6 +329,14 @@ public class Connector implements AutoCloseable {
         return execute(apiUrl, () -> unirest.post(baseURL + apiUrl)
                 .header("Content-Type", "application/x-www-form-urlencoded")
                 .body(body));
+    }
+
+    private JsonNode deleteJSONResource(String apiUrl) throws LoginException, ProxmoxException {
+        return execute(apiUrl, () -> unirest.delete(baseURL + apiUrl));
+    }
+
+    private static String formEncode(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 
     private static JSONObject dataObject(JsonNode node, String apiUrl) throws ProxmoxException {
@@ -442,6 +470,283 @@ public class Connector implements AutoCloseable {
     public String shutdownQemuMachine(String node, Integer vmid) throws LoginException, ProxmoxException {
         String url = qemuPath(node, vmid) + "/status/shutdown";
         return dataString(postJSONResource(url, ""), url);
+    }
+
+    // ------------------------------------------------------------------
+    // Cluster and node information
+    // ------------------------------------------------------------------
+
+    public JSONObject getNodeStatus(String node) throws LoginException, ProxmoxException {
+        String url = "nodes/" + nodeSegment(node) + "/status";
+        return dataObject(getJSONResource(url), url);
+    }
+
+    public JSONObject getClusterStatus() throws LoginException, ProxmoxException {
+        return getJSONResource("cluster/status").getObject();
+    }
+
+    public JSONObject getNodeResources(String node) throws LoginException, ProxmoxException {
+        return getJSONResource("nodes/" + nodeSegment(node) + "/rrd?timeframe=hour")
+                .getObject();
+    }
+
+    /**
+     * @return the raw entries Proxmox reports for the QEMU virtual machines of a node (status, cpu, memory, ...)
+     */
+    public List<JSONObject> getQemuMachineDetails(String node) throws LoginException, ProxmoxException {
+        List<JSONObject> res = new ArrayList<>();
+        String url = "nodes/" + nodeSegment(node) + "/qemu";
+        JSONArray qemuVMs = dataArray(getJSONResource(url), url);
+        for (int i = 0; i < qemuVMs.length(); i++) {
+            res.add(qemuVMs.getJSONObject(i));
+        }
+        return res;
+    }
+
+    // ------------------------------------------------------------------
+    // Snapshots
+    // ------------------------------------------------------------------
+
+    public String createQemuMachineSnapshot(String node, Integer vmid, String snapshotName)
+            throws LoginException, ProxmoxException {
+        return createQemuMachineSnapshot(node, vmid, snapshotName, null, true);
+    }
+
+    public String createQemuMachineSnapshot(
+            String node, Integer vmid, String snapshotName, String description, boolean includeRam)
+            throws LoginException, ProxmoxException {
+        StringBuilder body = new StringBuilder("snapname=").append(formEncode(snapshotSegment(snapshotName)));
+        if (description != null && !description.isEmpty()) {
+            body.append("&description=").append(formEncode(description));
+        }
+        if (includeRam) {
+            body.append("&vmstate=1");
+        }
+        String url = qemuPath(node, vmid) + "/snapshot";
+        return dataString(postJSONResource(url, body.toString()), url);
+    }
+
+    public String deleteQemuMachineSnapshot(String node, Integer vmid, String snapshotName)
+            throws LoginException, ProxmoxException {
+        String url = qemuPath(node, vmid) + "/snapshot/" + snapshotSegment(snapshotName);
+        return dataString(deleteJSONResource(url), url);
+    }
+
+    // ------------------------------------------------------------------
+    // Cloning, templates and deletion
+    // ------------------------------------------------------------------
+
+    public String cloneQemuMachine(String node, Integer vmid, Integer newid, String name)
+            throws LoginException, ProxmoxException {
+        return cloneQemuMachine(node, vmid, newid, name, true);
+    }
+
+    public String cloneQemuMachine(String node, Integer vmid, Integer newid, String name, boolean fullClone)
+            throws LoginException, ProxmoxException {
+        return cloneQemuMachine(node, vmid, newid, name, fullClone, null);
+    }
+
+    public String cloneQemuMachine(
+            String node, Integer vmid, Integer newid, String name, boolean fullClone, String snapname)
+            throws LoginException, ProxmoxException {
+        StringBuilder body = new StringBuilder("newid=").append(vmidSegment(newid));
+        if (name != null && !name.isEmpty()) {
+            body.append("&name=").append(formEncode(name));
+        }
+        if (!fullClone) {
+            body.append("&full=0");
+        }
+        if (snapname != null && !snapname.isEmpty()) {
+            body.append("&snapname=").append(formEncode(snapshotSegment(snapname)));
+        }
+        String url = qemuPath(node, vmid) + "/clone";
+        return dataString(postJSONResource(url, body.toString()), url);
+    }
+
+    public String convertQemuMachineToTemplate(String node, Integer vmid) throws LoginException, ProxmoxException {
+        String url = qemuPath(node, vmid) + "/template";
+        return dataString(postJSONResource(url, ""), url);
+    }
+
+    /**
+     * @return the id of the deletion task, or a plain message if Proxmox finished the deletion at once
+     */
+    public String deleteQemuMachine(String node, Integer vmid) throws LoginException, ProxmoxException {
+        String url = qemuPath(node, vmid);
+        JSONObject response = deleteJSONResource(url).getObject();
+        if (response.has("data") && !response.isNull("data")) {
+            return String.valueOf(response.get("data"));
+        }
+        return "VM deletion completed";
+    }
+
+    // ------------------------------------------------------------------
+    // Pause, resume and hibernate
+    // ------------------------------------------------------------------
+
+    public String pauseQemuMachine(String node, Integer vmid) throws LoginException, ProxmoxException {
+        String url = qemuPath(node, vmid) + "/status/suspend";
+        return dataString(postJSONResource(url, ""), url);
+    }
+
+    public String resumeQemuMachine(String node, Integer vmid) throws LoginException, ProxmoxException {
+        String url = qemuPath(node, vmid) + "/status/resume";
+        return dataString(postJSONResource(url, ""), url);
+    }
+
+    public String hibernateQemuMachine(String node, Integer vmid) throws LoginException, ProxmoxException {
+        String url = qemuPath(node, vmid) + "/status/suspend";
+        return dataString(postJSONResource(url, "todisk=1"), url);
+    }
+
+    // ------------------------------------------------------------------
+    // QEMU guest agent
+    // ------------------------------------------------------------------
+
+    private static final String POWERSHELL_EXE = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
+    private static final String CMD_EXE = "C:\\Windows\\System32\\cmd.exe";
+    private static final String[] WINDOWS_COMMAND_PREFIXES = {
+        "dir", "powershell", "cmd", "type", "copy", "del", "move", "echo", "set", "ipconfig", "netstat"
+    };
+
+    private static boolean looksLikeWindowsCommand(String lowerCaseCommand) {
+        if (lowerCaseCommand.contains(":\\") || lowerCaseCommand.contains("curl.exe")) {
+            return true;
+        }
+        for (String prefix : WINDOWS_COMMAND_PREFIXES) {
+            if (lowerCaseCommand.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Splits a command line into the argument vector the QEMU guest agent expects. Windows commands
+     * are recognised by their well known prefixes and run through {@code cmd.exe} or PowerShell,
+     * everything else is run through {@code /bin/sh}.
+     */
+    static List<String> guestCommandArguments(String command) {
+        String lower = command.toLowerCase(Locale.ROOT);
+        List<String> arguments = new ArrayList<>();
+        String remainder;
+        if (!looksLikeWindowsCommand(lower)) {
+            // QEMU guest agent format: ["/bin/sh", "--", "-c", "arg1", "arg2", ...]
+            arguments.add("/bin/sh");
+            arguments.add("--");
+            arguments.add("-c");
+            remainder = command;
+        } else if (lower.startsWith("powershell")) {
+            // PowerShell does not accept a '--' separator (it causes parse errors).
+            arguments.add(POWERSHELL_EXE);
+            remainder = command.substring(lower.startsWith("powershell.exe") ? 14 : 10);
+        } else if (lower.startsWith("cmd")) {
+            arguments.add(CMD_EXE);
+            remainder = command.substring(lower.startsWith("cmd.exe") ? 7 : 3);
+            if (!remainder.trim().isEmpty()) {
+                arguments.add("--");
+            }
+        } else {
+            // QEMU guest agent format: ["cmd.exe", "--", "/c", "arg1", "arg2", ...]
+            arguments.add(CMD_EXE);
+            arguments.add("--");
+            arguments.add("/c");
+            remainder = sanitizeWindowsCommand(command);
+        }
+        remainder = remainder.trim();
+        if (!remainder.isEmpty()) {
+            for (String part : remainder.split("\\s+")) {
+                arguments.add(part);
+            }
+        }
+        return arguments;
+    }
+
+    /**
+     * Executes a command in a virtual machine through the QEMU guest agent.
+     *
+     * @return the process id of the command, to be used with {@link #getGuestCommandStatus}
+     */
+    public String executeGuestCommand(String node, Integer vmid, String command)
+            throws LoginException, ProxmoxException {
+        if (command == null || command.trim().isEmpty()) {
+            throw new ProxmoxException("No guest command given");
+        }
+        // Proxmox VE 8+ expects the command as a JSON array: {"command": ["cmd", "arg1", "arg2"]}
+        JSONArray jsonCommand = new JSONArray();
+        for (String argument : guestCommandArguments(command.trim())) {
+            jsonCommand.put(argument);
+        }
+        JSONObject requestBody = new JSONObject();
+        requestBody.put("command", jsonCommand);
+
+        LOGGER.log(Level.FINE, "Executing guest command on VM {0}: {1}", new Object[] {vmid, jsonCommand});
+
+        String url = qemuPath(node, vmid) + "/agent/exec";
+        String json = requestBody.toString();
+        JSONObject response = execute(url, () -> unirest.post(baseURL + url)
+                        .header("Content-Type", "application/json")
+                        .body(json))
+                .getObject();
+        if (!response.has("data") || response.isNull("data")) {
+            throw new ProxmoxException("Proxmox returned no process id for the guest command: " + response);
+        }
+
+        // Depending on the Proxmox version the process id is the data itself or its "pid" attribute.
+        Object data = response.get("data");
+        if (data instanceof JSONObject && ((JSONObject) data).has("pid")) {
+            data = ((JSONObject) data).get("pid");
+        }
+        if (data instanceof Number) {
+            return String.valueOf(((Number) data).longValue());
+        }
+        return data.toString();
+    }
+
+    /**
+     * @param pid the process id returned by {@link #executeGuestCommand}
+     * @return the execution status of the command, including its output once it exited
+     */
+    public JSONObject getGuestCommandStatus(String node, Integer vmid, String pid)
+            throws LoginException, ProxmoxException {
+        if (pid == null || !pid.matches("\\d+")) {
+            throw new ProxmoxException("Invalid guest process id: '" + pid + "'");
+        }
+        String url = qemuPath(node, vmid) + "/agent/exec-status";
+        return dataObject(execute(url, () -> unirest.get(baseURL + url).queryString("pid", pid)), url);
+    }
+
+    /**
+     * @return whether the QEMU guest agent of the virtual machine answers a ping
+     */
+    public boolean isGuestAgentAvailable(String node, Integer vmid) throws LoginException {
+        try {
+            postJSONResource(qemuPath(node, vmid) + "/agent/ping", "");
+            return true;
+        } catch (ProxmoxException | RuntimeException e) {
+            LOGGER.log(Level.FINE, "Guest agent of virtual machine " + vmid + " is not available", e);
+            return false;
+        }
+    }
+
+    static String sanitizeWindowsCommand(String command) {
+        if (command == null || command.trim().isEmpty()) {
+            return command;
+        }
+
+        String sanitized = command.trim();
+
+        // "dir c:\" and similar: a trailing backslash breaks the command line built by the guest agent
+        if (sanitized.matches("^dir\\s+[a-zA-Z]:\\\\?$")) {
+            sanitized = sanitized.replaceAll("\\\\+$", "");
+        }
+
+        // A single trailing backslash (not an escaped one) causes syntax errors as well
+        if (sanitized.endsWith("\\") && !sanitized.endsWith("\\\\")) {
+            sanitized = sanitized.substring(0, sanitized.length() - 1);
+        }
+
+        return sanitized;
     }
 
     @Override

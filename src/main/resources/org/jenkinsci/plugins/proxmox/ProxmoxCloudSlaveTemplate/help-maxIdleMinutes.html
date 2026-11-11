@@ -1,0 +1,33 @@
+<div>
+    <p>
+        The number of minutes an agent can remain idle before being automatically terminated.
+    </p>
+    <p>
+        An agent is considered idle when it is online but not executing any builds.
+    </p>
+    <p>
+        <strong>Purpose:</strong> Automatically clean up unused agents to save resources and reduce costs.
+    </p>
+    <p>
+        <strong>Recommended Values:</strong>
+    </p>
+    <ul>
+        <li><strong>10-15 minutes:</strong> For frequently used agents, quick cleanup</li>
+        <li><strong>30 minutes (default):</strong> Balanced approach for most use cases</li>
+        <li><strong>60 minutes:</strong> For agents with expensive startup times</li>
+        <li><strong>0 minutes:</strong> Agent is terminated immediately after completing a build</li>
+    </ul>
+    <p>
+        <strong>Considerations:</strong>
+    </p>
+    <ul>
+        <li>Longer idle times reduce agent startup overhead for subsequent builds</li>
+        <li>Shorter idle times save resources but increase provisioning frequency</li>
+        <li>Consider your VM startup time when choosing this value</li>
+        <li>Balance between resource efficiency and build queue wait times</li>
+    </ul>
+    <p>
+        <strong>Note:</strong> This works in conjunction with the retention strategy. The default
+        "Cloud retention strategy" respects this idle time setting.
+    </p>
+</div>

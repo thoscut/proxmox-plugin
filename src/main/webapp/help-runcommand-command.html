@@ -1,0 +1,26 @@
+<div>
+    <p>
+        The command to execute on the virtual machine using the Proxmox guest agent.
+    </p>
+    <p>
+        <strong>Requirements:</strong>
+    </p>
+    <ul>
+        <li>The VM must be running</li>
+        <li>The Proxmox guest agent (qemu-guest-agent) must be installed and running in the VM</li>
+        <li>The guest agent must be enabled in the VM configuration</li>
+    </ul>
+    <p>
+        <strong>Examples:</strong>
+    </p>
+    <ul>
+        <li><code>ls -la /home</code> - List files in home directory</li>
+        <li><code>systemctl restart nginx</code> - Restart nginx service</li>
+        <li><code>echo "Hello from Jenkins" > /tmp/jenkins.txt</code> - Create a file</li>
+        <li><code>apt-get update && apt-get upgrade -y</code> - Update system packages</li>
+    </ul>
+    <p>
+        <strong>Note:</strong> Commands are executed with the privileges of the user running the guest agent
+        (typically root on Linux systems). Be careful with destructive operations.
+    </p>
+</div>

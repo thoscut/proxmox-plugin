@@ -1,0 +1,21 @@
+<div>
+    <p>
+        The authentication realm to use when connecting to Proxmox VE.
+    </p>
+    <p>
+        <strong>Common Realms:</strong>
+    </p>
+    <ul>
+        <li><code>pam</code> - Linux PAM standard authentication (uses /etc/passwd)</li>
+        <li><code>pve</code> - Proxmox VE authentication server (recommended for API users)</li>
+    </ul>
+    <p>
+        <strong>Recommendation:</strong> Use <code>pve</code> realm for dedicated API users as it provides
+        better isolation from system accounts. Use <code>pam</code> if you need to authenticate with existing
+        Linux system users.
+    </p>
+    <p>
+        The realm is combined with the username (e.g., <code>jenkins@pve</code> or <code>root@pam</code>)
+        when authenticating with Proxmox VE.
+    </p>
+</div>

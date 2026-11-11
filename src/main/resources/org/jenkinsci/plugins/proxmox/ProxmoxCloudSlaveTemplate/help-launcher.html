@@ -1,0 +1,45 @@
+<div>
+    <p>
+        <strong>Launch Method</strong>
+    </p>
+    <p>
+        The launch method determines how Jenkins connects to and starts the agent on the VM
+        after it has been cloned and started by Proxmox.
+    </p>
+    <p>
+        <strong>Recommended launch methods for Proxmox VMs:</strong>
+    </p>
+    <ul>
+        <li>
+            <strong>QEMU Guest Agent Launcher:</strong> Best option for Proxmox VMs
+            <ul>
+                <li>Uses Proxmox's QEMU Guest Agent to execute commands directly in the VM</li>
+                <li>Doesn't require network connectivity to be fully established</li>
+                <li>Works even if firewall rules aren't configured yet</li>
+                <li>Most reliable for cloud-provisioned VMs</li>
+            </ul>
+        </li>
+        <li>
+            <strong>Launch agent by connecting to master (JNLP):</strong> Good for agents behind firewalls
+            <ul>
+                <li>Agent connects outbound to Jenkins</li>
+                <li>Requires agent command to be configured</li>
+                <li>Works well with QEMU Guest Agent Launcher</li>
+            </ul>
+        </li>
+        <li>
+            <strong>Launch agents via SSH:</strong> Traditional method
+            <ul>
+                <li>Jenkins connects to agent via SSH</li>
+                <li>Requires SSH credentials configured</li>
+                <li>Requires SSH server running in the VM</li>
+                <li>Requires network connectivity fully established</li>
+            </ul>
+        </li>
+    </ul>
+    <p>
+        <strong>Best practice:</strong> Use <strong>QEMU Guest Agent Launcher</strong> for Proxmox VMs
+        as it provides the most reliable connection method by leveraging Proxmox's guest agent
+        integration.
+    </p>
+</div>

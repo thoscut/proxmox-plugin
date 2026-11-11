@@ -8,4 +8,12 @@
     If that fails the build is aborted. The virtual machine is not shut down on disconnect.
     This policy requires exactly one executor, because the disconnect would interrupt builds
     running on other executors.
+    <br/>
+    <b>After every job</b>: each time a build finished, the agent is disconnected, the virtual
+    machine is rolled back and started, and the agent is relaunched, so the next build finds a
+    clean machine. The virtual machine is not shut down on disconnect.
+    <br/>
+    <b>Never revert</b>: the virtual machine is neither rolled back nor started or shut down by
+    the agent. Use this when the virtual machine is managed elsewhere, for example with the
+    Proxmox build steps.
 </div>

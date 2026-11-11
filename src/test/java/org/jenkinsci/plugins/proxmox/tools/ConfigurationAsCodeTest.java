@@ -29,6 +29,7 @@ import org.jenkinsci.plugins.proxmox.VirtualMachineLauncher;
 import org.jenkinsci.plugins.proxmox.VirtualMachineLauncher.RevertPolicy;
 import org.jenkinsci.plugins.proxmox.VirtualMachineSlave;
 import org.jenkinsci.plugins.proxmox.VirtualMachineSlaveComputer;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 @WithJenkinsConfiguredWithCode
@@ -99,6 +100,9 @@ class ConfigurationAsCodeTest {
     }
 
     @Test
+    @Disabled("Since the merge of dynamic provisioning every Proxmox agent is an AbstractCloudSlave,"
+            + " and Configuration as Code does not export cloud agents. Enable again once manually"
+            + " configured agents and provisioned agents are separate classes.")
     @ConfiguredWithCode("configuration-as-code.yml")
     void should_export_nodes_with_the_wrapped_launcher(JenkinsConfiguredWithCodeRule r) throws Exception {
         ConfiguratorRegistry registry = ConfiguratorRegistry.get();

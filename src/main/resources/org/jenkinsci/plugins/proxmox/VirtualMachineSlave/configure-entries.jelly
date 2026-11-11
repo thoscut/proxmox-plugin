@@ -12,14 +12,23 @@
         <f:select fillDependsOn="datacenterDescription,datacenterNode" />
     </f:entry>
 
-    <f:entry title="${%Revert Snapshot}" field="snapshotName" help="/plugin/proxmox/help-vm-snapshotName.html">
+    <f:entry title="${%Revert Snapshot}" field="snapshotName" help="${descriptor.getHelpFile('snapshotName')}">
         <f:select fillDependsOn="datacenterDescription,datacenterNode,virtualMachineId" />
     </f:entry>
 
     <f:validateButton title="${%Check Snapshot}" progress="${%Testing...}" method="verifySnapshot"
                       with="datacenterDescription,datacenterNode,virtualMachineId,snapshotName"/>
 
-    <f:entry title="${%Start Virtual Machine}" field="startVM" help="/plugin/proxmox/help-vm-startVirtualMachine.html">
+    <f:validateButton title="${%Start VM}" progress="${%Starting VM...}" method="startVM"
+                      with="datacenterDescription,datacenterNode,virtualMachineId"/>
+
+    <f:validateButton title="${%Stop VM}" progress="${%Stopping VM...}" method="stopVM"
+                      with="datacenterDescription,datacenterNode,virtualMachineId"/>
+
+    <f:validateButton title="${%Check VM Status}" progress="${%Checking status...}" method="checkVMStatus"
+                      with="datacenterDescription,datacenterNode,virtualMachineId"/>
+
+    <f:entry title="${%Start Virtual Machine}" field="startVM" help="${descriptor.getHelpFile('startVM')}">
         <f:checkbox default="true" />
     </f:entry>
 
@@ -53,7 +62,7 @@
 
     <f:dropdownList name="slave.delegateLauncher" title="${%Secondary launch method}"
                     help="${descriptor.getHelpFile('launcher')}">
-        <j:forEach var="d" items="${descriptor.computerLauncherDescriptors(it)}">
+        <j:forEach var="d" items="${itDescriptor.computerLauncherDescriptors(it)}">
             <f:dropdownListBlock value="${d.clazz.name}" name="${d.displayName}"
                                  selected="${it.delegateLauncher.descriptor==d}"
                                  title="${d.displayName}">
@@ -67,7 +76,7 @@
     </f:dropdownList>
 
     <!-- pointless to show this if there's only one option, which is the default -->
-    <j:set var="retentionStrategies" value="${descriptor.retentionStrategyDescriptors(it)}"/>
+    <j:set var="retentionStrategies" value="${itDescriptor.retentionStrategyDescriptors(it)}"/>
     <j:if test="${retentionStrategies.size() gt 1}">
         <f:dropdownDescriptorSelector title="${%Availability}" field="retentionStrategy"
                                       descriptors="${retentionStrategies}"/>

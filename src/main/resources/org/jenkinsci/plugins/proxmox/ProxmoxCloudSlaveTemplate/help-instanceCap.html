@@ -1,0 +1,30 @@
+<div>
+    <p>
+        The maximum number of VMs that can be running simultaneously from this specific template.
+    </p>
+    <p>
+        <strong>Purpose:</strong> Limits the number of concurrent agents from this template to prevent
+        resource exhaustion and control costs.
+    </p>
+    <p>
+        <strong>How it works:</strong>
+    </p>
+    <ul>
+        <li>Jenkins will not provision new VMs from this template if this limit is reached</li>
+        <li>This is independent from the global datacenter instance cap</li>
+        <li>The effective limit is the minimum of this value and the datacenter cap</li>
+        <li>Set to <code>0</code> for unlimited (limited only by datacenter cap)</li>
+    </ul>
+    <p>
+        <strong>Example:</strong> If datacenter cap is 20 and this template cap is 5, you can have
+        at most 5 agents from this template, even if the datacenter has capacity for 15 more.
+    </p>
+    <p>
+        <strong>Recommended Values:</strong>
+    </p>
+    <ul>
+        <li>Lightweight templates: 5-10 VMs</li>
+        <li>Resource-intensive templates: 2-5 VMs</li>
+        <li>Special-purpose templates: 1-3 VMs</li>
+    </ul>
+</div>

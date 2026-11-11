@@ -1,0 +1,17 @@
+<div>
+    <p>
+        Maximum time in seconds to wait for the Jenkins agent to connect back to the Jenkins master after executing the agent command.
+    </p>
+    <p>
+        This timeout only applies when "Wait for Agent Ready" is enabled. If the agent doesn't connect within this time,
+        a warning will be logged but the launch process will continue.
+    </p>
+    <p>
+        <strong>Recommended values:</strong>
+    </p>
+    <ul>
+        <li>Fast VMs with SSD storage: 30-60 seconds</li>
+        <li>Standard VMs: 60-120 seconds</li>
+        <li>Slow VMs or heavy workloads: 120-300 seconds</li>
+    </ul>
+</div>

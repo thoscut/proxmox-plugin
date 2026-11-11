@@ -1,0 +1,143 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:d="jelly:define" xmlns:l="/lib/layout" xmlns:t="/lib/hudson" xmlns:f="/lib/form">
+
+    <!-- Basic Configuration -->
+    <f:entry title="${%Template Name}" field="templateName"
+             help="${descriptor.getHelpFile('templateName')}">
+        <f:textbox placeholder="e.g., Ubuntu 22.04 Docker"/>
+    </f:entry>
+
+    <f:entry title="${%Labels}" field="labels"
+             help="${descriptor.getHelpFile('labels')}">
+        <f:textbox placeholder="e.g., linux docker kubernetes"/>
+    </f:entry>
+
+    <!-- VM Configuration Section -->
+    <f:advanced title="${%VM Configuration}">
+        <f:entry title="${%Datacenter Node}" field="datacenterNode"
+                 help="${descriptor.getHelpFile('datacenterNode')}">
+            <f:select />
+        </f:entry>
+
+        <f:entry title="${%Template VM ID}" field="templateVmId"
+                 help="${descriptor.getHelpFile('templateVmId')}">
+            <f:select fillDependsOn="datacenterNode" />
+        </f:entry>
+
+        <f:entry title="${%Snapshot Name}" field="snapshotName"
+                 help="${descriptor.getHelpFile('snapshotName')}">
+            <f:select fillDependsOn="datacenterNode,templateVmId" />
+        </f:entry>
+
+        <f:validateButton title="${%Check Template VM Status}" progress="${%Checking status...}"
+                          method="checkTemplateVMStatus"
+                          with="datacenterNode,templateVmId"/>
+    </f:advanced>
+
+    <!-- Clone Configuration Section -->
+    <f:advanced title="${%Clone Configuration}">
+        <f:entry title="${%Linked Clone}" field="linkedClone"
+                 help="${descriptor.getHelpFile('linkedClone')}">
+            <f:checkbox default="false" />
+            <f:description>
+                Faster provisioning using linked clones. Requires snapshot.
+            </f:description>
+        </f:entry>
+
+        <f:entry title="${%Start VM After Clone}" field="startVM"
+                 help="${descriptor.getHelpFile('startVM')}">
+            <f:checkbox default="true" />
+        </f:entry>
+
+        <f:entry title="${%Startup Waiting Period (seconds)}" field="startupWaitingPeriodSeconds"
+                 help="${descriptor.getHelpFile('startupWaitingPeriodSeconds')}">
+            <f:number default="60" clazz="number" min="0" step="1"/>
+        </f:entry>
+    </f:advanced>
+
+    <!-- Guest Agent Configuration Section -->
+    <f:advanced title="${%Guest Agent Configuration}">
+        <f:entry title="${%Wait for Guest Agent}" field="waitForGuestAgent"
+                 help="${descriptor.getHelpFile('waitForGuestAgent')}">
+            <f:checkbox default="false" />
+            <f:description>
+                More reliable than fixed waiting period. Requires QEMU Guest Agent installed.
+            </f:description>
+        </f:entry>
+
+        <f:entry title="${%Guest Agent Timeout (seconds)}" field="waitForGuestAgentTimeoutSeconds"
+                 help="${descriptor.getHelpFile('waitForGuestAgentTimeoutSeconds')}">
+            <f:number default="120" clazz="number" min="1" max="600" step="1"/>
+        </f:entry>
+    </f:advanced>
+
+    <!-- Post-Clone Actions Section -->
+    <f:advanced title="${%Post-Clone Actions}">
+        <f:optionalBlock title="${%Run Post-Clone Command}" field="runPostCloneCommand" inline="true">
+            <f:entry title="${%Command}" field="postCloneCommand"
+                     help="${descriptor.getHelpFile('postCloneCommand')}">
+                <f:textarea cols="80" rows="3" placeholder="Command to run via QEMU Guest Agent after cloning"/>
+            </f:entry>
+
+            <f:entry title="${%Timeout (seconds)}" field="postCloneCommandTimeout"
+                     help="${descriptor.getHelpFile('postCloneCommandTimeout')}">
+                <f:number default="300" clazz="number" min="1" max="3600" step="1"/>
+            </f:entry>
+        </f:optionalBlock>
+    </f:advanced>
+
+    <!-- Resource Management Section -->
+    <f:advanced title="${%Resource Management}">
+        <f:entry title="${%Instance Cap}" field="instanceCap"
+                 help="${descriptor.getHelpFile('instanceCap')}">
+            <f:number default="10" clazz="number" min="0" step="1"/>
+            <f:description>
+                Maximum VMs from this template. Set to 0 for unlimited.
+            </f:description>
+        </f:entry>
+
+        <f:entry title="${%Force Cleanup Running VMs}" field="forceCleanupRunningVMs"
+                 help="${descriptor.getHelpFile('forceCleanupRunningVMs')}">
+            <f:checkbox default="false" />
+            <f:description>
+                Delete orphaned VMs even if running. Use with caution!
+            </f:description>
+        </f:entry>
+
+        <f:entry title="${%Number of Executors}" field="numExecutors"
+                 help="${descriptor.getHelpFile('numExecutors')}">
+            <f:textbox default="1" placeholder="1"/>
+        </f:entry>
+
+        <f:entry title="${%Remote FS Root}" field="remoteFS"
+                 help="${descriptor.getHelpFile('remoteFS')}">
+            <f:textbox default="/tmp" placeholder="/home/jenkins or C:\Jenkins"/>
+        </f:entry>
+
+        <f:entry title="${%Max Idle Minutes}" field="maxIdleMinutes"
+                 help="${descriptor.getHelpFile('maxIdleMinutes')}">
+            <f:number default="30" clazz="number" min="0" step="1"/>
+        </f:entry>
+
+        <f:entry title="${%Limited Builds Before Disconnect}" field="limitedBuildsBeforeDisconnect"
+                 help="${descriptor.getHelpFile('limitedBuildsBeforeDisconnect')}">
+            <f:number default="0" clazz="number" min="0" step="1"/>
+            <f:description>
+                Disconnect agent after this many builds. Set to 0 for unlimited builds.
+            </f:description>
+        </f:entry>
+    </f:advanced>
+
+    <!-- Launch Configuration -->
+    <f:entry title="${%Launch method}" help="${descriptor.getHelpFile('launcher')}">
+        <f:hetero-radio field="launcher" descriptors="${h.getComputerLauncherDescriptors()}"/>
+    </f:entry>
+
+    <f:entry title="${%Retention Strategy}" help="${descriptor.getHelpFile('retentionStrategy')}">
+        <f:hetero-radio field="retentionStrategy" descriptors="${descriptor.retentionStrategyDescriptors}"/>
+    </f:entry>
+
+    <f:descriptorList title="${%Node Properties}" descriptors="${h.getNodePropertyDescriptors(it.class)}"
+                      field="nodeProperties"/>
+
+</j:jelly>

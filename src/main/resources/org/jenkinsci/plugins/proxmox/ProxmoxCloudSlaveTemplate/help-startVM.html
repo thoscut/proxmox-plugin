@@ -1,0 +1,26 @@
+<div>
+    <p>
+        Automatically start the VM after cloning.
+    </p>
+    <p>
+        <strong>Enabled (default):</strong> The VM will be started immediately after cloning completes.
+        This is the normal behavior for Jenkins agents.
+    </p>
+    <p>
+        <strong>Disabled:</strong> The VM will be cloned but left in a stopped state. Useful for:
+    </p>
+    <ul>
+        <li>Pre-provisioning VMs for later use</li>
+        <li>Running post-clone commands before starting</li>
+        <li>Manual VM configuration before first boot</li>
+        <li>Testing clone operations without consuming runtime resources</li>
+    </ul>
+    <p>
+        <strong>Note:</strong> If you disable this option, you'll need another mechanism to start the VMs,
+        or they won't be able to connect to Jenkins as agents.
+    </p>
+    <p>
+        <strong>Recommendation:</strong> Keep this enabled unless you have a specific use case requiring
+        manual VM startup.
+    </p>
+</div>

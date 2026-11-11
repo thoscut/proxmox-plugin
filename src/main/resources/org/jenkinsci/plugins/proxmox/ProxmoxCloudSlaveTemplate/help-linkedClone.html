@@ -1,0 +1,29 @@
+<div>
+  <p>
+    When enabled, creates a linked clone instead of a full clone of the template VM.
+  </p>
+  
+  <h3>Linked Clone vs Full Clone:</h3>
+  
+  <h4>Linked Clone (Checked):</h4>
+  <ul>
+    <li><strong>Faster provisioning:</strong> Creates VMs much quicker as only differences are stored</li>
+    <li><strong>Storage efficient:</strong> Uses significantly less disk space</li>
+    <li><strong>Dependency:</strong> Requires the original template VM to remain available</li>
+    <li><strong>Best for:</strong> Development environments, temporary workers, frequent provisioning</li>
+  </ul>
+  
+  <h4>Full Clone (Unchecked - Default):</h4>
+  <ul>
+    <li><strong>Independent:</strong> Complete copy that doesn't depend on the template VM</li>
+    <li><strong>More storage:</strong> Uses full disk space for each clone</li>
+    <li><strong>Slower provisioning:</strong> Takes more time to create</li>
+    <li><strong>Best for:</strong> Production environments, long-running agents, maximum reliability</li>
+  </ul>
+  
+  <p>
+    <strong>Recommendation:</strong> Use linked clones for development and testing where fast provisioning 
+    is more important than independence. Use full clones for production where reliability and independence 
+    are critical.
+  </p>
+</div>

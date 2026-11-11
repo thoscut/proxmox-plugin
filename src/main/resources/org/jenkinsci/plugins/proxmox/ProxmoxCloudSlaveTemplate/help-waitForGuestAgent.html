@@ -1,0 +1,24 @@
+<div>
+  <p>
+    If enabled, Jenkins will wait for the QEMU guest agent to become active before
+    continuing with the agent connection process.
+  </p>
+
+  <p>
+    This effectively makes the "Startup Waiting Period" timer to be relative to
+    the time when the virtual machine's guest agent is "up" rather than requiring a
+    longer waiting period to cope with variations in startup speeds.
+  </p>
+
+  <p>
+    <strong>Requirements:</strong> The QEMU guest agent must be installed and configured
+    on the template VM for this feature to work. Without the guest agent installed,
+    the timeout will be reached and provisioning will continue anyway.
+  </p>
+
+  <p>
+    <strong>Benefit:</strong> This option improves reliability when VMs have variable
+    startup times, ensuring that Jenkins waits for the VM to be fully operational
+    before attempting to connect.
+  </p>
+</div>

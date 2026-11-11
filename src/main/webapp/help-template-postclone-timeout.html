@@ -1,0 +1,27 @@
+<div>
+    <p>
+        Maximum time in seconds to wait for the post-clone command to complete.
+    </p>
+    <p>
+        If the command takes longer than the specified timeout, it will be considered failed
+        and a warning will be logged. However, the VM will still be created as a Jenkins slave.
+    </p>
+    <p>
+        <strong>Default:</strong> 300 seconds (5 minutes)<br>
+        <strong>Range:</strong> 1 to 3600 seconds (1 hour)
+    </p>
+    <p>
+        <strong>Recommended timeouts by task type:</strong>
+    </p>
+    <ul>
+        <li><strong>File operations, directory creation:</strong> 30-60 seconds</li>
+        <li><strong>Service management (start/stop/enable):</strong> 60-120 seconds</li>
+        <li><strong>Package installation (small packages):</strong> 180-300 seconds</li>
+        <li><strong>System updates, large installations:</strong> 600-1800 seconds</li>
+        <li><strong>Complex setup scripts:</strong> 900-3600 seconds</li>
+    </p>
+    <p>
+        <strong>Note:</strong> Setting very short timeouts may cause successful operations to be marked as failed.
+        Setting very long timeouts may delay slave provisioning if commands hang.
+    </p>
+</div>

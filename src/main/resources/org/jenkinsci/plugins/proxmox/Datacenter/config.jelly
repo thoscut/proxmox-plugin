@@ -1,8 +1,9 @@
 <?jelly escape-by-default='true'?>
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:d="jelly:define" xmlns:l="/lib/layout" xmlns:t="/lib/hudson" xmlns:f="/lib/form" xmlns:c="/lib/credentials">
 
-    <f:entry title="${%Hostname}" field="hostname" help="/plugin/proxmox/help-datacenter-hostname.html">
-        <f:textbox />
+    <f:entry title="${%Proxmox VE Hostname}" field="hostname"
+             help="${descriptor.getHelpFile('hostname')}">
+        <f:textbox placeholder="proxmox.example.com or proxmox.example.com:8006"/>
     </f:entry>
 
     <f:entry title="${%Credentials}" field="credentialsId" help="/plugin/proxmox/help-datacenter-credentialsId.html">
@@ -31,5 +32,16 @@
 
     <f:validateButton title="${%Test Connection}" progress="${%Testing...}" method="testConnection"
                       with="hostname,username,realm,password,credentialsId,ignoreSSL"/>
+
+    <f:entry title="${%Instance Cap}" field="instanceCap"
+             help="${descriptor.getHelpFile('instanceCap')}">
+        <f:number default="10" clazz="number" min="0" step="1"/>
+        <f:description>
+            Maximum number of VMs across all templates. Set to 0 for unlimited.
+        </f:description>
+    </f:entry>
+
+    <f:repeatableProperty field="templates" header="${%Agent Templates}"
+                         addCaption="${%Add Agent Template}"/>
 
 </j:jelly>

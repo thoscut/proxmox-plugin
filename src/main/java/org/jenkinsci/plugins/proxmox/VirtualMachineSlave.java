@@ -1,13 +1,13 @@
 package org.jenkinsci.plugins.proxmox;
 
-import static java.util.Collections.emptyList;
-import static java.util.Optional.ofNullable;
-
+import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.Extension;
 import hudson.Util;
 import hudson.model.Computer;
 import hudson.model.Descriptor;
-import hudson.model.Slave;
+import hudson.model.TaskListener;
+import hudson.remoting.VirtualChannel;
+import hudson.slaves.AbstractCloudSlave;
 import hudson.slaves.Cloud;
 import hudson.slaves.ComputerLauncher;
 import hudson.slaves.NodeProperty;
@@ -17,18 +17,31 @@ import hudson.util.ListBoxModel;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import javax.security.auth.login.LoginException;
 import jenkins.model.Jenkins;
+import kong.unirest.json.JSONObject;
+import org.jenkinsci.plugins.cloudstats.ProvisioningActivity;
+import org.jenkinsci.plugins.cloudstats.TrackedItem;
 import org.jenkinsci.plugins.proxmox.VirtualMachineLauncher.RevertPolicy;
+import org.jenkinsci.plugins.proxmox.pve2api.Connector;
 import org.kohsuke.stapler.AncestorInPath;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.DataBoundSetter;
 import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.verb.POST;
 
-public class VirtualMachineSlave extends Slave {
+/**
+ * An agent running in a Proxmox virtual machine. It is either configured by hand for an existing
+ * virtual machine, or provisioned on demand by a {@link ProxmoxCloudSlaveTemplate}, which clones a
+ * template for it; only the latter owns its virtual machine and deletes it when the agent is removed.
+ */
+public class VirtualMachineSlave extends AbstractCloudSlave implements TrackedItem {
 
     private static final long serialVersionUID = 1L;
+
+    private static final Logger LOGGER = Logger.getLogger(VirtualMachineSlave.class.getName());
 
     private String datacenterDescription;
     private String datacenterNode;
@@ -37,6 +50,11 @@ public class VirtualMachineSlave extends Slave {
     private Boolean startVM;
     private int startupWaitingPeriodSeconds;
     private RevertPolicy revertPolicy;
+    private transient int limitedBuildsCount = 0;
+    private transient int buildsExecuted = 0;
+
+    /** Set for agents provisioned by the cloud; identifies them for the cloud statistics plugin. */
+    private ProvisioningActivity.Id provisioningId;
 
     @DataBoundConstructor
     public VirtualMachineSlave(
@@ -47,7 +65,7 @@ public class VirtualMachineSlave extends Slave {
             Mode mode,
             String labelString,
             ComputerLauncher delegateLauncher,
-            RetentionStrategy retentionStrategy,
+            RetentionStrategy<?> retentionStrategy,
             List<? extends NodeProperty<?>> nodeProperties,
             String datacenterDescription,
             String datacenterNode,
@@ -59,11 +77,7 @@ public class VirtualMachineSlave extends Slave {
             throws IOException, Descriptor.FormException {
         super(
                 name,
-                nodeDescription,
                 remoteFS,
-                numExecutors,
-                mode,
-                labelString,
                 new VirtualMachineLauncher(
                         delegateLauncher,
                         datacenterDescription,
@@ -72,9 +86,17 @@ public class VirtualMachineSlave extends Slave {
                         snapshotName,
                         startVM,
                         startupWaitingPeriodSeconds,
-                        revertPolicy),
-                retentionStrategy,
-                ofNullable(nodeProperties).orElse(emptyList()));
+                        revertPolicy));
+        setNodeDescription(nodeDescription);
+        setNumExecutors(Util.tryParseNumber(numExecutors, 1).intValue());
+        setMode(mode);
+        setLabelString(labelString);
+        if (retentionStrategy != null) {
+            setRetentionStrategy(retentionStrategy);
+        }
+        if (nodeProperties != null) {
+            getNodeProperties().replaceBy(nodeProperties);
+        }
         this.datacenterDescription = datacenterDescription;
         this.datacenterNode = datacenterNode;
         this.virtualMachineId = virtualMachineId;
@@ -154,10 +176,128 @@ public class VirtualMachineSlave extends Slave {
         super.setLauncher(launcher);
     }
 
+    public void setLimitedBuildsCount(int count) {
+        this.limitedBuildsCount = count;
+    }
+
+    public int getLimitedBuildsCount() {
+        return limitedBuildsCount;
+    }
+
+    public int getBuildsExecuted() {
+        return buildsExecuted;
+    }
+
+    /** {@link TrackedItem} implementation for the cloud statistics plugin. */
     @Override
-    public Computer createComputer() {
+    @CheckForNull
+    public ProvisioningActivity.Id getId() {
+        return provisioningId;
+    }
+
+    public void setProvisioningId(ProvisioningActivity.Id id) {
+        this.provisioningId = id;
+    }
+
+    /**
+     * @return whether the cloud cloned the virtual machine for this agent. Only then the virtual
+     *     machine belongs to the agent and may be deleted together with it; a virtual machine that
+     *     was assigned to an agent by hand is never deleted.
+     */
+    public boolean isProvisionedByCloud() {
+        return provisioningId != null;
+    }
+
+    /**
+     * Counts a finished build and removes the agent, together with its cloned virtual machine,
+     * once the configured number of builds was reached.
+     */
+    public void incrementBuildsExecuted() {
+        buildsExecuted++;
+        if (limitedBuildsCount <= 0 || buildsExecuted < limitedBuildsCount) {
+            return;
+        }
+        try {
+            if (isProvisionedByCloud()) {
+                deleteVirtualMachine();
+            }
+
+            // Close the channel before removing the node to prevent WebSocket timeout errors
+            Computer computer = toComputer();
+            VirtualChannel channel = computer == null ? null : computer.getChannel();
+            if (channel != null) {
+                try {
+                    channel.close();
+                } catch (IOException e) {
+                    LOGGER.log(Level.WARNING, "Failed to close the channel of " + getNodeName() + " before removal", e);
+                }
+            }
+
+            Jenkins.get().removeNode(this);
+            LOGGER.log(Level.INFO, "Agent {0} deprovisioned after {1} builds", new Object[] {
+                getNodeName(), limitedBuildsCount
+            });
+        } catch (IOException | RuntimeException e) {
+            // Log, but do not fail the build
+            LOGGER.log(Level.WARNING, "Failed to deprovision agent " + getNodeName() + " after limited builds", e);
+        }
+    }
+
+    /** Stops and deletes the cloned virtual machine of this agent; failures are logged. */
+    private void deleteVirtualMachine() {
+        Datacenter datacenter = Datacenter.findByDescription(datacenterDescription);
+        if (datacenter == null || virtualMachineId == null || datacenterNode == null) {
+            return;
+        }
+        try {
+            Connector pveApi = datacenter.proxmoxInstance();
+            if (pveApi.isQemuMachineRunning(datacenterNode, virtualMachineId)) {
+                LOGGER.log(Level.INFO, "Stopping VM {0} before deletion", virtualMachineId.toString());
+                String stopTask = pveApi.stopQemuMachine(datacenterNode, virtualMachineId);
+                JSONObject stopResult = pveApi.waitForTaskToFinish(datacenterNode, stopTask);
+                LOGGER.log(Level.INFO, "VM {0} stop finished: {1}", new Object[] {
+                    virtualMachineId.toString(), VirtualMachineLauncher.describe(stopResult)
+                });
+            }
+            String deleteTask = pveApi.deleteQemuMachine(datacenterNode, virtualMachineId);
+            LOGGER.log(Level.INFO, "VM {0} deletion initiated (task: {1})", new Object[] {
+                virtualMachineId.toString(), deleteTask
+            });
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            LOGGER.log(Level.WARNING, "Interrupted while deleting VM " + virtualMachineId, e);
+        } catch (LoginException | IOException | RuntimeException e) {
+            LOGGER.log(Level.WARNING, "Failed to stop/delete VM " + virtualMachineId + " from Proxmox", e);
+        }
+    }
+
+    @Override
+    public VirtualMachineSlaveComputer createComputer() {
         // The computer implements the "Before every job" revert in taskAccepted().
         return new VirtualMachineSlaveComputer(this);
+    }
+
+    /**
+     * Called when the agent is deleted. A virtual machine that the cloud cloned for this agent is
+     * stopped and deleted; one that was assigned by hand is left alone.
+     */
+    @Override
+    protected void _terminate(TaskListener listener) throws IOException, InterruptedException {
+        if (!isProvisionedByCloud()) {
+            return;
+        }
+        Datacenter datacenter = Datacenter.findByDescription(datacenterDescription);
+        if (datacenter == null) {
+            listener.getLogger().println("Warning: Cannot terminate - datacenter not found: " + datacenterDescription);
+            return;
+        }
+        Computer computer = toComputer();
+        if (computer == null) {
+            listener.getLogger().println("Warning: Cannot terminate - computer is null");
+            return;
+        }
+        listener.getLogger().println("Terminating VM " + virtualMachineId + " through datacenter");
+        datacenter.terminate(computer);
     }
 
     @Extension
@@ -292,6 +432,96 @@ public class VirtualMachineSlave extends Slave {
                 return FormValidation.error("Login Failed: " + e.getMessage());
             } catch (IOException | RuntimeException e) {
                 return FormValidation.error("Request failed: " + e.getMessage());
+            }
+        }
+
+        @POST
+        public FormValidation doStartVM(
+                @QueryParameter String datacenterDescription,
+                @QueryParameter String datacenterNode,
+                @QueryParameter Integer virtualMachineId) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+            Datacenter datacenter = getDatacenterByDescription(datacenterDescription);
+            if (datacenter == null) return FormValidation.error("Datacenter not found!");
+            try {
+                Connector pveApi = datacenter.proxmoxInstance();
+                if (pveApi.isQemuMachineRunning(datacenterNode, virtualMachineId)) {
+                    return FormValidation.warning("VM " + virtualMachineId + " is already running");
+                }
+                String taskId = pveApi.startQemuMachine(datacenterNode, virtualMachineId);
+                return FormValidation.ok("Start task initiated with ID: " + taskId);
+            } catch (LoginException e) {
+                return FormValidation.error("Login Failed: " + e.getMessage());
+            } catch (IOException | RuntimeException e) {
+                return FormValidation.error("Start VM Failed: " + e.getMessage());
+            }
+        }
+
+        @POST
+        public FormValidation doStopVM(
+                @QueryParameter String datacenterDescription,
+                @QueryParameter String datacenterNode,
+                @QueryParameter Integer virtualMachineId) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+            Datacenter datacenter = getDatacenterByDescription(datacenterDescription);
+            if (datacenter == null) return FormValidation.error("Datacenter not found!");
+            try {
+                Connector pveApi = datacenter.proxmoxInstance();
+                if (!pveApi.isQemuMachineRunning(datacenterNode, virtualMachineId)) {
+                    return FormValidation.warning("VM " + virtualMachineId + " is already stopped");
+                }
+                String taskId = pveApi.stopQemuMachine(datacenterNode, virtualMachineId);
+                return FormValidation.ok("Stop task initiated with ID: " + taskId);
+            } catch (LoginException e) {
+                return FormValidation.error("Login Failed: " + e.getMessage());
+            } catch (IOException | RuntimeException e) {
+                return FormValidation.error("Stop VM Failed: " + e.getMessage());
+            }
+        }
+
+        @POST
+        public FormValidation doCheckVMStatus(
+                @QueryParameter String datacenterDescription,
+                @QueryParameter String datacenterNode,
+                @QueryParameter Integer virtualMachineId) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+            Datacenter datacenter = getDatacenterByDescription(datacenterDescription);
+            if (datacenter == null) return FormValidation.error("Datacenter not found!");
+            try {
+                JSONObject status = datacenter.proxmoxInstance().getQemuMachineStatus(datacenterNode, virtualMachineId);
+                String vmStatus = status.optString("status", "unknown");
+                boolean isRunning = "running".equals(vmStatus);
+
+                StringBuilder statusMessage = new StringBuilder();
+                statusMessage.append("VM ").append(virtualMachineId).append(" Status: ").append(vmStatus);
+                if (isRunning) {
+                    statusMessage.append(" (Running)");
+                    if (status.has("uptime")) {
+                        statusMessage.append(", Uptime: ").append(status.optLong("uptime")).append("s");
+                    }
+                    if (status.has("cpu")) {
+                        statusMessage.append(", CPU: ").append(String.format("%.2f%%", status.optDouble("cpu") * 100));
+                    }
+                    long memBytes = status.optLong("mem", -1);
+                    long maxmemBytes = status.optLong("maxmem", -1);
+                    if (memBytes >= 0 && maxmemBytes > 0) {
+                        statusMessage
+                                .append(", Memory: ")
+                                .append(String.format(
+                                        "%.1f%% (%d MB / %d MB)",
+                                        (double) memBytes / maxmemBytes * 100,
+                                        memBytes / (1024 * 1024),
+                                        maxmemBytes / (1024 * 1024)));
+                    }
+                } else {
+                    statusMessage.append(" (Stopped)");
+                }
+
+                return FormValidation.ok(statusMessage.toString());
+            } catch (LoginException e) {
+                return FormValidation.error("Login Failed: " + e.getMessage());
+            } catch (IOException | RuntimeException e) {
+                return FormValidation.error("Status Check Failed: " + e.getMessage());
             }
         }
 

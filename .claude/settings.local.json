@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(export JAVA_HOME=\"C:\\Program Files\\Eclipse Adoptium\\jdk-21.0.6.7-hotspot\")",
+      "Bash(mvn clean:*)",
+      "Bash(git checkout:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(mvn:*)",
+      "Bash(find:*)",
+      "Bash(cat:*)",
+      "Bash(jar tf:*)",
+      "Bash(xargs ls:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

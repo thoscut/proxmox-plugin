@@ -1,0 +1,31 @@
+<div>
+    <p>
+        <strong>Wait for Command Completion</strong>
+    </p>
+    <p>
+        When enabled, the build step will wait for the command to finish executing
+        before proceeding to the next step.
+    </p>
+    <p>
+        <strong>Enabled (default):</strong>
+    </p>
+    <ul>
+        <li>Build waits for command to complete</li>
+        <li>Command output is captured and displayed in build logs</li>
+        <li>Exit code determines build step success/failure</li>
+        <li>Timeout applies to full command execution</li>
+    </ul>
+    <p>
+        <strong>Disabled (fire-and-forget):</strong>
+    </p>
+    <ul>
+        <li>Command starts and build step immediately succeeds</li>
+        <li>Command runs asynchronously in the background</li>
+        <li>No output captured, no exit code checked</li>
+        <li>Useful for starting long-running services or background tasks</li>
+    </ul>
+    <p>
+        <strong>Recommendation:</strong> Keep enabled unless you specifically need
+        to start a background process without waiting.
+    </p>
+</div>

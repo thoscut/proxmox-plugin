@@ -1,0 +1,28 @@
+<div>
+    <p>
+        The maximum number of VMs that can be running simultaneously across all templates in this cloud.
+    </p>
+    <p>
+        <strong>Purpose:</strong> Limits resource usage and prevents overloading your Proxmox infrastructure.
+    </p>
+    <p>
+        <strong>How it works:</strong>
+    </p>
+    <ul>
+        <li>Jenkins will not provision new VMs if this limit is reached</li>
+        <li>This is a global cap across all agent templates in this cloud</li>
+        <li>Individual templates can have their own lower instance caps</li>
+        <li>Set to <code>0</code> for unlimited VMs (not recommended)</li>
+    </ul>
+    <p>
+        <strong>Recommended Values:</strong>
+    </p>
+    <ul>
+        <li>Small setups (1-2 nodes): 5-10 VMs</li>
+        <li>Medium setups (3-5 nodes): 10-20 VMs</li>
+        <li>Large setups (6+ nodes): 20-50 VMs</li>
+    </ul>
+    <p>
+        Consider your Proxmox cluster's CPU, memory, and storage capacity when setting this value.
+    </p>
+</div>

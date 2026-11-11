@@ -1,0 +1,17 @@
+<div>
+    <p>
+        Maximum number of attempts to execute the agent command if it fails.
+    </p>
+    <p>
+        If the guest agent command execution fails (e.g., due to temporary network issues or VM load),
+        this launcher will retry the command up to the specified number of times with a 5-second delay between attempts.
+    </p>
+    <p>
+        <strong>Recommended values:</strong>
+    </p>
+    <ul>
+        <li>Stable environments: 2-3 retries</li>
+        <li>Unstable networks or high VM load: 3-5 retries</li>
+        <li>Development/testing: 1-2 retries</li>
+    </ul>
+</div>

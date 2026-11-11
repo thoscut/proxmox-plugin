@@ -1,0 +1,43 @@
+<div>
+    <p>
+        Command to execute on the VM via QEMU Guest Agent after cloning and before the agent connects to Jenkins.
+    </p>
+    <p>
+        <strong>Requirements:</strong>
+    </p>
+    <ul>
+        <li>QEMU Guest Agent must be installed and running on the template VM</li>
+        <li>The command runs with the privileges of the guest agent (usually root/SYSTEM)</li>
+        <li>The VM must be started before the command can execute</li>
+    </ul>
+    <p>
+        <strong>Common Use Cases:</strong>
+    </p>
+    <ul>
+        <li>Update hostname or network configuration</li>
+        <li>Run cloud-init or configuration management tools</li>
+        <li>Update system packages</li>
+        <li>Configure VM-specific settings</li>
+        <li>Prepare the environment for Jenkins</li>
+    </ul>
+    <p>
+        <strong>Example Commands:</strong>
+    </p>
+    <pre><code># Linux - Update packages
+apt-get update &amp;&amp; apt-get upgrade -y
+
+# Windows - Set computer name
+powershell.exe Rename-Computer -NewName "jenkins-agent-$(date +%s)" -Force
+
+# Run a configuration script
+/opt/setup-jenkins-agent.sh</code></pre>
+    <p>
+        <strong>Important:</strong>
+    </p>
+    <ul>
+        <li>The command should complete within the configured timeout</li>
+        <li>For long-running tasks, consider using background processes</li>
+        <li>Test commands manually via Proxmox before using in production</li>
+        <li>Use absolute paths for executables</li>
+    </ul>
+</div>

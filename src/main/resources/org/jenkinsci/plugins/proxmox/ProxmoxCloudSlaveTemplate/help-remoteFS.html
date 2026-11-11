@@ -1,0 +1,30 @@
+<div>
+    <p>
+        The directory on the agent VM where Jenkins will store files and perform builds.
+    </p>
+    <p>
+        <strong>Platform-Specific Defaults:</strong>
+    </p>
+    <ul>
+        <li><strong>Linux/Unix:</strong> <code>/home/jenkins</code> or <code>/var/lib/jenkins</code></li>
+        <li><strong>Windows:</strong> <code>C:\Jenkins</code> or <code>C:\Users\jenkins</code></li>
+    </ul>
+    <p>
+        <strong>Requirements:</strong>
+    </p>
+    <ul>
+        <li>The directory must exist or be creatable by the Jenkins agent user</li>
+        <li>The agent user must have read/write permissions</li>
+        <li>Sufficient disk space for builds, workspaces, and artifacts</li>
+        <li>Should be on a fast disk for better build performance</li>
+    </ul>
+    <p>
+        <strong>Best Practices:</strong>
+    </p>
+    <ul>
+        <li>Use a dedicated directory, not the user's home directory</li>
+        <li>Avoid system directories like <code>/tmp</code> (may be cleared on reboot)</li>
+        <li>For Windows, avoid paths with spaces</li>
+        <li>Consider using a separate mount point for build isolation</li>
+    </ul>
+</div>
