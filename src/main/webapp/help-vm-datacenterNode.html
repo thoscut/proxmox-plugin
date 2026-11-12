@@ -1,5 +1,12 @@
 <div>
-    The Proxmox cluster node the virtual machine currently runs on. The list is loaded from the
-    selected datacenter; if it stays empty, check the credential and the Jenkins log.
-    If the virtual machine is migrated to another node, update the node here.
+    Optional. The plugin asks the datacenter on which cluster node the virtual machine currently is,
+    so the virtual machine is still found after it was migrated to another node.
+    <p>
+        Leave this at <i>[Automatic]</i> to choose from the virtual machines of all nodes, or select
+        a node to shorten the list of virtual machines. A selected node is only used if the
+        datacenter does not report where the virtual machine is, for example because the account
+        lacks the permission <code>VM.Audit</code> for it.
+    </p>
+    The list is loaded from the selected datacenter; if it stays empty, check the credential and
+    the Jenkins log.
 </div>

@@ -103,6 +103,9 @@ pipeline {
 
 ## Available Build Steps
 
+`datacenterNode` is optional in all build steps. The node a VM is on is looked up, so the VM is also found
+after it was migrated to another node; a given node is only used if the lookup does not find the VM.
+
 ### Snapshot Operations
 
 #### CreateSnapshot

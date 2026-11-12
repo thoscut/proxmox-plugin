@@ -37,6 +37,15 @@ import org.junit.jupiter.api.Test;
 class ConnectorHttpTest {
 
     private static final String UPID = "UPID:pve1:00001234:00000000:00000000:qmtask:100:user@pve:";
+    private static final String UPID_PVE2 = "UPID:pve2:00001234:00000000:00000000:qmtask:200:user@pve:";
+    private static final String LOOKUP = "GET cluster/resources?type=vm";
+
+    /** Virtual machines 100 and 101 are on pve1, 200 is on pve2; 300 is a container. */
+    private static final String VMS = "{\"data\":["
+            + "{\"id\":\"qemu/101\",\"type\":\"qemu\",\"vmid\":101,\"node\":\"pve1\",\"name\":\"agent\"},"
+            + "{\"id\":\"qemu/100\",\"type\":\"qemu\",\"vmid\":100,\"node\":\"pve1\",\"name\":\"agent\"},"
+            + "{\"id\":\"lxc/300\",\"type\":\"lxc\",\"vmid\":300,\"node\":\"pve1\",\"name\":\"container\"},"
+            + "{\"id\":\"qemu/200\",\"type\":\"qemu\",\"vmid\":200,\"node\":\"pve2\"}]}";
     private static final String TOKEN = "jenkins@pve!ci=12345678-aaaa-bbbb-cccc-1234567890ab";
 
     private HttpServer server;
@@ -51,6 +60,9 @@ class ConnectorHttpTest {
     private final AtomicInteger logins = new AtomicInteger();
     private volatile boolean rejectLogin;
     private volatile String rejectedTicket;
+
+    /** The answer to the listing of all virtual machines; {@code null} lets the request fail. */
+    private volatile String clusterResources = VMS;
 
     @BeforeEach
     void startServer() throws IOException {
@@ -93,6 +105,13 @@ class ConnectorHttpTest {
             respond(exchange, 401, "{\"data\":null}");
         } else if (path.equals("version")) {
             respond(exchange, 200, "{\"data\":{\"version\":\"8.4\"}}");
+        } else if (path.equals("cluster/resources")) {
+            String resources = clusterResources;
+            respond(exchange, resources == null ? 500 : 200, resources == null ? "{\"data\":null}" : resources);
+        } else if (path.startsWith("nodes/pve2/tasks/")) {
+            respond(exchange, 200, "{\"data\":{\"status\":\"stopped\",\"exitstatus\":\"OK\"}}");
+        } else if (path.startsWith("nodes/pve2/qemu/200") && !method.equals("GET")) {
+            respond(exchange, 200, "{\"data\":\"" + UPID_PVE2 + "\"}");
         } else if (path.equals("nodes")) {
             respond(exchange, 200, "{\"data\":[{\"node\":\"pve1\"},{\"node\":\"pve2\"}]}");
         } else if (path.equals("nodes/pve1/qemu")) {
@@ -283,6 +302,7 @@ class ConnectorHttpTest {
                 requests,
                 contains(
                         "POST access/ticket",
+                        LOOKUP,
                         "POST nodes/pve1/qemu/100/template",
                         "POST nodes/pve1/qemu/100/status/suspend",
                         "POST nodes/pve1/qemu/100/status/suspend",
@@ -295,6 +315,132 @@ class ConnectorHttpTest {
         assertThat(connector.deleteQemuMachine("pve1", 101), is("VM deletion completed"));
         assertThat(requests, hasItem("DELETE nodes/pve1/qemu/100"));
         assertThat(requests, hasItem("DELETE nodes/pve1/qemu/101"));
+    }
+
+    // ------------------------------------------------------------------
+    // The node of a virtual machine
+    // ------------------------------------------------------------------
+
+    @Test
+    void lists_the_virtual_machines_of_all_nodes_without_containers() throws Exception {
+        Map<Integer, String> machines = connector.getQemuMachines();
+        assertThat(machines.keySet(), contains(100, 101, 200));
+        assertThat(machines.get(100), is("agent"));
+        assertThat(machines.get(200), is("VM 200"));
+        assertThat(connector.getQemuMachines("").keySet(), contains(100, 101, 200));
+        assertThat(connector.getQemuMachines(null).keySet(), contains(100, 101, 200));
+    }
+
+    @Test
+    void finds_the_node_of_a_virtual_machine() throws Exception {
+        assertThat(connector.findNodeOfQemuMachine(100), is("pve1"));
+        assertThat(connector.findNodeOfQemuMachine(200), is("pve2"));
+        assertThat(connector.findNodeOfQemuMachine(300), is(nullValue()));
+        assertThat(connector.findNodeOfQemuMachine(999), is(nullValue()));
+    }
+
+    @Test
+    void uses_the_node_the_virtual_machine_is_on_instead_of_the_configured_one() throws Exception {
+        assertThat(connector.startQemuMachine("pve1", 200), is(UPID_PVE2));
+        assertThat(requests, hasItem("POST nodes/pve2/qemu/200/status/start"));
+        assertThat(requests, not(hasItem("POST nodes/pve1/qemu/200/status/start")));
+    }
+
+    @Test
+    void needs_no_node_at_all() throws Exception {
+        assertThat(connector.startQemuMachine(null, 200), is(UPID_PVE2));
+        assertThat(connector.stopQemuMachine("", 200), is(UPID_PVE2));
+        assertThat(connector.shutdownQemuMachine("  ", 100), is(UPID));
+        assertThat(
+                requests,
+                contains(
+                        "POST access/ticket",
+                        LOOKUP,
+                        "POST nodes/pve2/qemu/200/status/start",
+                        "POST nodes/pve2/qemu/200/status/stop",
+                        "POST nodes/pve1/qemu/100/status/shutdown"));
+    }
+
+    @Test
+    void follows_a_virtual_machine_that_was_migrated() throws Exception {
+        // Do not trust a known location at all, as if the time it is trusted had passed
+        connector.setVmLocationLifetimeMs(0, 0);
+        connector.startQemuMachine("pve1", 100);
+        assertThat(requests, hasItem("POST nodes/pve1/qemu/100/status/start"));
+
+        clusterResources = VMS.replace("\"vmid\":100,\"node\":\"pve1\"", "\"vmid\":100,\"node\":\"pve2\"");
+        assertThat(connector.findNodeOfQemuMachine(100), is("pve2"));
+        // The stub has no virtual machine 100 on pve2, which is not the point here
+        assertThrows(ProxmoxException.class, () -> connector.startQemuMachine("pve1", 100));
+        assertThat(requests, hasItem("POST nodes/pve2/qemu/100/status/start"));
+    }
+
+    @Test
+    void uses_the_configured_node_if_the_datacenter_does_not_list_the_virtual_machine() throws Exception {
+        clusterResources = "{\"data\":[]}";
+        assertThat(connector.startQemuMachine("pve1", 100), is(UPID));
+        assertThat(requests, hasItem("POST nodes/pve1/qemu/100/status/start"));
+    }
+
+    @Test
+    void uses_the_configured_node_if_the_virtual_machines_cannot_be_listed() throws Exception {
+        clusterResources = null;
+        assertThat(connector.startQemuMachine("pve1", 100), is(UPID));
+        assertThat(requests, hasItem("POST nodes/pve1/qemu/100/status/start"));
+    }
+
+    @Test
+    void without_a_node_an_unknown_virtual_machine_is_an_error() {
+        ProxmoxException e = assertThrows(ProxmoxException.class, () -> connector.startQemuMachine(null, 999));
+        assertThat(e.getMessage(), containsString("999"));
+        assertThat(e.getMessage(), containsString("not found on any node"));
+
+        // Nor can a virtual machine be found if the virtual machines cannot be listed
+        connector.setVmLocationLifetimeMs(0, 0);
+        clusterResources = null;
+        assertThrows(ProxmoxException.class, () -> connector.startQemuMachine("", 100));
+        assertThat(requests, not(hasItem(containsString("status/start"))));
+    }
+
+    @Test
+    void a_new_virtual_machine_is_found_although_the_others_were_listed_just_before() throws Exception {
+        // Listed virtual machines are trusted for a while, missing ones are not
+        connector.setVmLocationLifetimeMs(60_000, 0);
+        clusterResources = VMS.replace(",{\"id\":\"qemu/200\",\"type\":\"qemu\",\"vmid\":200,\"node\":\"pve2\"}", "");
+        assertThat(connector.findNodeOfQemuMachine(200), is(nullValue()));
+        assertThat(connector.findNodeOfQemuMachine(100), is("pve1"));
+        assertThat(requests, contains("POST access/ticket", LOOKUP));
+
+        // A clone was created in the meantime
+        clusterResources = VMS;
+        assertThat(connector.startQemuMachine(null, 200), is(UPID_PVE2));
+        assertThat(requests, contains("POST access/ticket", LOOKUP, LOOKUP, "POST nodes/pve2/qemu/200/status/start"));
+    }
+
+    @Test
+    void does_not_list_the_virtual_machines_again_for_one_that_stays_missing() throws Exception {
+        clusterResources = "{\"data\":[]}";
+        connector.startQemuMachine("pve1", 100);
+        connector.stopQemuMachine("pve1", 100);
+        assertThat(
+                requests,
+                contains(
+                        "POST access/ticket",
+                        LOOKUP,
+                        "POST nodes/pve1/qemu/100/status/start",
+                        "POST nodes/pve1/qemu/100/status/stop"));
+    }
+
+    @Test
+    void asks_the_node_a_task_ran_on_for_its_status() throws Exception {
+        assertThat(Connector.isTaskSuccessful(connector.waitForTaskToFinish("pve1", UPID_PVE2)), is(true));
+        assertThat(Connector.isTaskSuccessful(connector.waitForTaskToFinish(null, UPID_PVE2)), is(true));
+        assertThat(requests, hasItem("GET nodes/pve2/tasks/" + UPID_PVE2 + "/status"));
+        assertThat(requests, not(hasItem(containsString("nodes/pve1/tasks/"))));
+
+        assertThat(Connector.taskNode("pve1", UPID_PVE2), is("pve2"));
+        assertThat(Connector.taskNode("pve1", "VM deletion completed"), is("pve1"));
+        assertThat(Connector.taskNode("pve1", null), is("pve1"));
     }
 
     // ------------------------------------------------------------------

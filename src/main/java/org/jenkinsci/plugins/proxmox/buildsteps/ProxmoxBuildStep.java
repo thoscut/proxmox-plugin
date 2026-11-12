@@ -112,7 +112,8 @@ public abstract class ProxmoxBuildStep extends Builder implements BuildStep {
         
         public ListBoxModel doFillDatacenterNodeItems(@QueryParameter String datacenterDescription) {
             ListBoxModel items = new ListBoxModel();
-            items.add("[Select]", "");
+            // The node is optional: the datacenter knows where a virtual machine is.
+            items.add("[Automatic]", "");
             
             if (datacenterDescription != null && !datacenterDescription.isEmpty()) {
                 for (Cloud cloud : Jenkins.get().clouds) {
@@ -135,8 +136,8 @@ public abstract class ProxmoxBuildStep extends Builder implements BuildStep {
             ListBoxModel items = new ListBoxModel();
             items.add("[Select]", "");
             
-            if (datacenterDescription != null && !datacenterDescription.isEmpty() &&
-                datacenterNode != null && !datacenterNode.isEmpty()) {
+            // Without a node the virtual machines of all nodes are offered
+            if (datacenterDescription != null && !datacenterDescription.isEmpty()) {
                 for (Cloud cloud : Jenkins.get().clouds) {
                     if (cloud instanceof Datacenter) {
                         Datacenter datacenter = (Datacenter) cloud;

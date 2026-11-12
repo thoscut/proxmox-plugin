@@ -256,7 +256,8 @@ public class VirtualMachineSlave extends Slave implements ProxmoxAgent {
                 @QueryParameter("datacenterDescription") String datacenterDescription) {
             checkConfigurePermission(computer);
             ListBoxModel items = new ListBoxModel();
-            items.add("[Select]", "");
+            // The node is optional: the datacenter knows where a virtual machine is.
+            items.add("[Automatic]", "");
             Datacenter datacenter = getDatacenterByDescription(datacenterDescription);
             if (datacenter != null) {
                 for (String node : datacenter.getNodes()) {
@@ -321,7 +322,6 @@ public class VirtualMachineSlave extends Slave implements ProxmoxAgent {
             checkConfigurePermission(computer);
             Datacenter datacenter = getDatacenterByDescription(datacenterDescription);
             if (datacenter == null) return FormValidation.error("Datacenter not found!");
-            if (Util.fixEmptyAndTrim(datacenterNode) == null) return FormValidation.error("No node selected");
             int vmid;
             try {
                 vmid = Integer.parseInt(Util.fixNull(virtualMachineId).trim());

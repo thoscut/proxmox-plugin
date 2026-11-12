@@ -21,27 +21,6 @@ import org.junit.jupiter.api.Test;
 class DatacenterTest {
 
     @Test
-    void getQemuMachines_returns_empty_for_null_node() {
-        Datacenter dc = new Datacenter("host", "user", "pve", null, false);
-        Map<Integer, String> result = dc.getQemuMachines(null);
-        assertThat(result.isEmpty(), is(true));
-    }
-
-    @Test
-    void getQemuMachines_returns_empty_for_empty_node() {
-        Datacenter dc = new Datacenter("host", "user", "pve", null, false);
-        Map<Integer, String> result = dc.getQemuMachines("");
-        assertThat(result.isEmpty(), is(true));
-    }
-
-    @Test
-    void getQemuMachineSnapshots_returns_empty_for_null_node() {
-        Datacenter dc = new Datacenter("host", "user", "pve", null, false);
-        List<String> result = dc.getQemuMachineSnapshots(null, 1);
-        assertThat(result, is(empty()));
-    }
-
-    @Test
     void getQemuMachineSnapshots_returns_empty_for_null_vmid() {
         Datacenter dc = new Datacenter("host", "user", "pve", null, false);
         List<String> result = dc.getQemuMachineSnapshots("node1", null);
@@ -52,13 +31,6 @@ class DatacenterTest {
     void getQemuMachineSnapshots_returns_empty_for_invalid_vmid() {
         Datacenter dc = new Datacenter("host", "user", "pve", null, false);
         List<String> result = dc.getQemuMachineSnapshots("node1", 0);
-        assertThat(result, is(empty()));
-    }
-
-    @Test
-    void getQemuMachineSnapshots_returns_empty_for_empty_node() {
-        Datacenter dc = new Datacenter("host", "user", "pve", null, false);
-        List<String> result = dc.getQemuMachineSnapshots("", 1);
         assertThat(result, is(empty()));
     }
 
@@ -151,7 +123,13 @@ class DatacenterTest {
         // The list helpers swallow the failure and return empty collections for the dropdowns.
         assertThat(dc.getNodes(), is(empty()));
         assertThat(dc.getQemuMachines("node1").isEmpty(), is(true));
+        // Without a node the virtual machines of all nodes are listed
+        assertThat(dc.getQemuMachines(null).isEmpty(), is(true));
+        assertThat(dc.getQemuMachines("").isEmpty(), is(true));
         assertThat(dc.getQemuMachineSnapshots("node1", 100), is(empty()));
+        // The node of a virtual machine is optional
+        assertThat(dc.getQemuMachineSnapshots(null, 100), is(empty()));
+        assertThat(dc.getQemuMachineSnapshots("", 100), is(empty()));
     }
 
     @Test

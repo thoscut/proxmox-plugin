@@ -1,17 +1,16 @@
 <div>
     <p>
-        The Proxmox node where the template VM is located.
+        Optional. The plugin asks the datacenter on which cluster node the template VM currently is,
+        so the template is still found after it was migrated to another node.
     </p>
     <p>
-        This dropdown lists all available nodes in your Proxmox cluster. Select the node that hosts
-        the VM template you want to use for creating agents.
+        Leave this at <i>[Automatic]</i> to choose from the virtual machines of all nodes, or select
+        a node to shorten the list of virtual machines. A selected node is only used if the
+        datacenter does not report where the template VM is, for example because the account
+        lacks the permission <code>VM.Audit</code> for it.
     </p>
     <p>
         <strong>Note:</strong> Cloned VMs will be created on the same node as the template VM by default,
         unless you have configured specific storage or resource allocation rules in Proxmox.
-    </p>
-    <p>
-        <strong>Performance Tip:</strong> For better performance, choose nodes with sufficient resources
-        (CPU, RAM, storage) available for creating and running multiple agent VMs.
     </p>
 </div>

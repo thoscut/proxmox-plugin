@@ -453,7 +453,8 @@ All Proxmox build steps use the `$class` parameter for pipeline syntax:
 
 ### Datacenter Connection
 - `datacenterDescription` - The datacenter identifier (e.g., "user@pve - hostname")
-- `datacenterNode` - The Proxmox node name
+- `datacenterNode` - The Proxmox node name. Optional: the node the VM is on is looked up, so the VM
+  is also found after it was migrated; the given node is only used if the lookup does not find the VM
 - `vmId` - The VM ID to operate on
 
 ### RunCommand Options

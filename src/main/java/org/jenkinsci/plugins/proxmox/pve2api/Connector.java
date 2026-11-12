@@ -44,7 +44,15 @@ public class Connector implements AutoCloseable {
     private final ProxmoxAuth auth;
     final String baseURL;
 
+    // A virtual machine moves to another node when it is migrated, so its location is only trusted for a
+    // while. A virtual machine that is not listed may have just been created, so that is trusted even shorter.
+    static final long VM_LOCATION_LIFETIME_MS = 30 * 1000;
+    static final long VM_LOCATION_MISS_LIFETIME_MS = 2 * 1000;
+
     private volatile Ticket ticket;
+    private volatile VmLocations vmLocations;
+    private long vmLocationLifetimeMs = VM_LOCATION_LIFETIME_MS;
+    private long vmLocationMissLifetimeMs = VM_LOCATION_MISS_LIFETIME_MS;
     private final UnirestInstance unirest;
     private long taskTimeoutMs = DEFAULT_TASK_TIMEOUT_MS;
 
@@ -60,6 +68,17 @@ public class Connector implements AutoCloseable {
             this.authTicket = authTicket;
             this.csrfPreventionToken = csrfPreventionToken;
             this.issuedAtMs = issuedAtMs;
+        }
+    }
+
+    /** The QEMU virtual machines of the whole datacenter and the nodes they were on when it was read. */
+    private static final class VmLocations {
+        final Map<Integer, String> nodes = new TreeMap<>();
+        final Map<Integer, String> names = new TreeMap<>();
+        final long readAtMs = System.currentTimeMillis();
+
+        boolean isOlderThan(long lifetimeMs) {
+            return System.currentTimeMillis() - readAtMs >= lifetimeMs;
         }
     }
 
@@ -195,8 +214,103 @@ public class Connector implements AutoCloseable {
         return vmid.toString();
     }
 
-    private static String qemuPath(String node, Integer vmid) throws ProxmoxException {
-        return "nodes/" + nodeSegment(node) + "/qemu/" + vmidSegment(vmid);
+    private static boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
+    }
+
+    /**
+     * @param node the node the virtual machine is expected on; may be blank. It is only used if the
+     *     datacenter does not report where the virtual machine is, see {@link #currentNode}.
+     */
+    private String qemuPath(String node, Integer vmid) throws LoginException, ProxmoxException {
+        // Validate before the first request, so no request is sent for invalid values.
+        String vm = vmidSegment(vmid);
+        String expectedNode = isBlank(node) ? null : nodeSegment(node.trim());
+        return "nodes/" + nodeSegment(currentNode(expectedNode, vmid)) + "/qemu/" + vm;
+    }
+
+    /**
+     * Virtual machine ids are unique in a datacenter, so the datacenter knows on which node a
+     * virtual machine is. That node is used, because a virtual machine that was migrated is no
+     * longer on the node it was configured with.
+     *
+     * @return the node the virtual machine is on; {@code expectedNode} if the datacenter cannot
+     *     tell, for example because the account may not see the virtual machine in the listing
+     * @throws ProxmoxException if the node is unknown and no expected node was given
+     */
+    private String currentNode(String expectedNode, Integer vmid) throws LoginException, ProxmoxException {
+        String node;
+        try {
+            node = findNodeOfQemuMachine(vmid);
+        } catch (ProxmoxException e) {
+            if (expectedNode == null) {
+                throw e;
+            }
+            LOGGER.log(Level.FINE, "Could not look up the node of virtual machine " + vmid, e);
+            return expectedNode;
+        }
+        if (node != null) {
+            return node;
+        }
+        if (expectedNode == null) {
+            throw new ProxmoxException("Virtual machine " + vmid + " was not found on any node of the datacenter."
+                    + " It does not exist, or the account lacks the permission VM.Audit to see it.");
+        }
+        return expectedNode;
+    }
+
+    /**
+     * @return the node the QEMU virtual machine is on at the moment, or {@code null} if the
+     *     datacenter does not list it
+     */
+    public String findNodeOfQemuMachine(Integer vmid) throws LoginException, ProxmoxException {
+        VmLocations locations = vmLocations;
+        if (locations != null && !locations.isOlderThan(vmLocationLifetimeMs)) {
+            String node = locations.nodes.get(vmid);
+            if (node != null || !locations.isOlderThan(vmLocationMissLifetimeMs)) {
+                return node;
+            }
+        }
+        return readVmLocations().nodes.get(vmid);
+    }
+
+    private VmLocations readVmLocations() throws LoginException, ProxmoxException {
+        String url = "cluster/resources?type=vm";
+        JSONArray resources = dataArray(getJSONResource(url), url);
+        VmLocations locations = new VmLocations();
+        for (int i = 0; i < resources.length(); i++) {
+            JSONObject vm = resources.getJSONObject(i);
+            // The listing also contains containers ("lxc")
+            if (!"qemu".equals(vm.optString("type")) || !vm.has("vmid")) {
+                continue;
+            }
+            int vmid = vm.getInt("vmid");
+            String node = vm.optString("node", null);
+            if (node != null) {
+                locations.nodes.put(vmid, node);
+            }
+            locations.names.put(vmid, vm.optString("name", "VM " + vmid));
+        }
+        vmLocations = locations;
+        return locations;
+    }
+
+    /**
+     * Tasks are kept by the node they ran on, which is part of their id:
+     * {@code UPID:<node>:<pid>:...}. The node of the virtual machine may be another one by now.
+     */
+    static String taskNode(String node, String taskId) {
+        String[] parts = taskId == null ? new String[0] : taskId.split(":");
+        if (parts.length > 2 && "UPID".equals(parts[0]) && NODE_NAME.matcher(parts[1]).matches()) {
+            return parts[1];
+        }
+        return node;
+    }
+
+    /** Only for tests, which cannot wait until the location of a virtual machine is looked up again. */
+    void setVmLocationLifetimeMs(long lifetimeMs, long missLifetimeMs) {
+        this.vmLocationLifetimeMs = lifetimeMs;
+        this.vmLocationMissLifetimeMs = missLifetimeMs;
     }
 
     /** Only for tests, which cannot wait ten minutes for a task to time out. */
@@ -386,7 +500,8 @@ public class Connector implements AutoCloseable {
     }
 
     public JSONObject getTaskStatus(String node, String taskId) throws LoginException, ProxmoxException {
-        String url = "nodes/" + nodeSegment(node) + "/tasks/" + encodePathSegment(taskSegment(taskId)) + "/status";
+        String task = encodePathSegment(taskSegment(taskId));
+        String url = "nodes/" + nodeSegment(taskNode(node, taskId)) + "/tasks/" + task + "/status";
         return dataObject(getJSONResource(url), url);
     }
 
@@ -431,9 +546,21 @@ public class Connector implements AutoCloseable {
     }
 
     /**
-     * @return the QEMU virtual machines of a node, keyed and sorted by VM id, with their names as values.
+     * @return the QEMU virtual machines of all nodes of the datacenter, keyed and sorted by VM id,
+     *     with their names as values.
+     */
+    public Map<Integer, String> getQemuMachines() throws LoginException, ProxmoxException {
+        return new TreeMap<>(readVmLocations().names);
+    }
+
+    /**
+     * @param node the node to list; if blank, the virtual machines of all nodes are listed
+     * @return the QEMU virtual machines, keyed and sorted by VM id, with their names as values.
      */
     public Map<Integer, String> getQemuMachines(String node) throws LoginException, ProxmoxException {
+        if (isBlank(node)) {
+            return getQemuMachines();
+        }
         Map<Integer, String> res = new TreeMap<>();
         String url = "nodes/" + nodeSegment(node) + "/qemu";
         JSONArray qemuVMs = dataArray(getJSONResource(url), url);
@@ -463,7 +590,8 @@ public class Connector implements AutoCloseable {
 
     public String rollbackQemuMachineSnapshot(String node, Integer vmid, String snapshotName)
             throws LoginException, ProxmoxException {
-        String url = qemuPath(node, vmid) + "/snapshot/" + snapshotSegment(snapshotName) + "/rollback";
+        String snapshot = snapshotSegment(snapshotName);
+        String url = qemuPath(node, vmid) + "/snapshot/" + snapshot + "/rollback";
         return dataString(postJSONResource(url, ""), url);
     }
 
@@ -538,7 +666,8 @@ public class Connector implements AutoCloseable {
 
     public String deleteQemuMachineSnapshot(String node, Integer vmid, String snapshotName)
             throws LoginException, ProxmoxException {
-        String url = qemuPath(node, vmid) + "/snapshot/" + snapshotSegment(snapshotName);
+        String snapshot = snapshotSegment(snapshotName);
+        String url = qemuPath(node, vmid) + "/snapshot/" + snapshot;
         return dataString(deleteJSONResource(url), url);
     }
 

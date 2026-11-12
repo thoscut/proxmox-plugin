@@ -69,6 +69,12 @@ To add agents go to "Manage Jenkins" > "Nodes" and click "New Node". Select the
 node type "Agent virtual machine running on a Proxmox datacenter" and
 enter a name for the node.
 
+Select the datacenter and the virtual machine. The **Datacenter Node** is optional: the plugin
+asks the datacenter on which node a virtual machine is, so it is still found after it was
+migrated to another node. A selected node only shortens the list of virtual machines, and is
+used if the datacenter does not report where the virtual machine is (the account needs the
+permission `VM.Audit` for that).
+
 The revert policy decides when the virtual machine is rolled back to the selected snapshot:
 
 | Policy           | Behaviour                                                                                 |
@@ -85,8 +91,9 @@ configuration) and set the instance cap of the datacenter. A template describes:
 
 -   **Template Name** and **Labels**: builds that ask for one of the labels get an agent from
     this template.
--   **Datacenter Node**, **Template VM ID** and optionally a **Snapshot**: the virtual machine
-    to clone. A running virtual machine can only be cloned from a snapshot. A linked clone is
+-   **Template VM ID** and optionally a **Snapshot** and the **Datacenter Node**: the virtual
+    machine to clone. The node is optional, as for agents on existing virtual machines.
+    A running virtual machine can only be cloned from a snapshot. A linked clone is
     used if selected and supported by the storage, otherwise a full clone.
 -   **Remote FS**, **Executors**, **Launcher** and **Retention strategy** of the agents.
 -   **Start VM**, **Startup wait** and **Wait for guest agent**: how the clone is brought up.
@@ -146,7 +153,8 @@ jenkins:
 
 `launcher` is the agent's own launch method (`jnlp`, `ssh`, ...); the plugin wraps it in its
 virtual machine launcher. `delegateLauncher` is accepted as an alias.
-`startVM` defaults to `false` when omitted.
+`startVM` defaults to `false` when omitted. `datacenterNode` may be omitted as well; the node
+is then looked up.
 
 Only agents that are bound to an existing virtual machine are configured this way. They are
 included in an export, and removed when a configuration that no longer lists them is applied.

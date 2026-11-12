@@ -147,12 +147,6 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
             LOGGER.log(Level.SEVERE, errorMessage);
             throw new IllegalStateException(errorMessage);
         }
-        if (datacenterNode == null || datacenterNode.trim().isEmpty()) {
-            String errorMessage = "Datacenter node is not configured for template '" + templateName +
-                                  "'. Please configure the template in Jenkins cloud settings.";
-            LOGGER.log(Level.SEVERE, errorMessage);
-            throw new IllegalStateException(errorMessage);
-        }
 
         int currentCount = getCurrentSlaveCount();
         int instanceCap = getInstanceCap();
@@ -273,7 +267,7 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
     private String generateCloneName(Connector proxmoxApi) throws LoginException, IOException {
         // Get the actual template VM name from Proxmox using the template VM ID
         Integer templateVmIdInt = Integer.parseInt(templateVmId);
-        String actualTemplateName = proxmoxApi.getQemuMachines(datacenterNode).get(templateVmIdInt);
+        String actualTemplateName = proxmoxApi.getQemuMachines().get(templateVmIdInt);
 
         // Fallback to configured template name if not found
         if (actualTemplateName == null) {
@@ -323,7 +317,7 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
         Integer templateVmIdInt = Integer.parseInt(templateVmId);
         
         // Get template name for better logging
-        String templateVmName = proxmoxApi.getQemuMachines(datacenterNode).get(templateVmIdInt);
+        String templateVmName = proxmoxApi.getQemuMachines().get(templateVmIdInt);
         // Fallback if template name not found
         if (templateVmName == null) {
             templateVmName = "VM-" + templateVmIdInt;
@@ -461,13 +455,13 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
 
     private Integer getNextAvailableVmId(Connector proxmoxApi) throws LoginException, IOException {
         // Use per-datacenter synchronization instead of global lock to prevent blocking other datacenters
-        synchronized (this.datacenterNode.intern()) {
+        synchronized (String.valueOf(this.datacenterNode).intern()) {
             // Use timestamp-based approach to reduce collisions
             long timestamp = System.currentTimeMillis();
             int baseId = 1000 + (int)(timestamp % 8000); // Spread IDs across 1000-9000 range
 
             // Get fresh VM list
-            Map<Integer, String> existingVms = proxmoxApi.getQemuMachines(datacenterNode);
+            Map<Integer, String> existingVms = proxmoxApi.getQemuMachines();
 
             // Start from timestamp-based ID and search for available ID
             int vmId = baseId;
@@ -782,7 +776,8 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
         public ListBoxModel doFillDatacenterNodeItems() {
             Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             ListBoxModel items = new ListBoxModel();
-            items.add("[Select]", "");
+            // The node is optional: the datacenter knows where a virtual machine is.
+            items.add("[Automatic]", "");
             
             for (Cloud cloud : Jenkins.get().clouds) {
                 if (cloud instanceof Datacenter) {
@@ -801,14 +796,13 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
             ListBoxModel items = new ListBoxModel();
             items.add("[Select]", "");
             
-            if (datacenterNode != null && !datacenterNode.isEmpty()) {
-                for (Cloud cloud : Jenkins.get().clouds) {
-                    if (cloud instanceof Datacenter) {
-                        Datacenter datacenter = (Datacenter) cloud;
-                        Map<Integer, String> machines = datacenter.getQemuMachines(datacenterNode);
-                        for (Map.Entry<Integer, String> entry : machines.entrySet()) {
-                            items.add(entry.getValue() + " (" + entry.getKey() + ")", entry.getKey().toString());
-                        }
+            // Without a node the virtual machines of all nodes are offered
+            for (Cloud cloud : Jenkins.get().clouds) {
+                if (cloud instanceof Datacenter) {
+                    Datacenter datacenter = (Datacenter) cloud;
+                    Map<Integer, String> machines = datacenter.getQemuMachines(datacenterNode);
+                    for (Map.Entry<Integer, String> entry : machines.entrySet()) {
+                        items.add(entry.getValue() + " (" + entry.getKey() + ")", entry.getKey().toString());
                     }
                 }
             }
@@ -822,8 +816,7 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
             ListBoxModel items = new ListBoxModel();
             items.add("[Select]", "");
             
-            if (datacenterNode != null && !datacenterNode.isEmpty() && 
-                templateVmId != null && !templateVmId.isEmpty()) {
+            if (templateVmId != null && !templateVmId.isEmpty()) {
                 try {
                     Integer vmId = Integer.parseInt(templateVmId);
                     for (Cloud cloud : Jenkins.get().clouds) {
@@ -881,22 +874,12 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
             }
         }
 
-        public FormValidation doCheckDatacenterNode(@QueryParameter String value) {
-            if (value == null || value.trim().isEmpty()) {
-                return FormValidation.error("Datacenter node is required");
-            }
-            return FormValidation.ok();
-        }
-
         @POST  
         public FormValidation doCheckTemplateVMStatus(
                 @QueryParameter String datacenterNode,
                 @QueryParameter String templateVmId) {
             Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             
-            if (datacenterNode == null || datacenterNode.isEmpty()) {
-                return FormValidation.error("Please select a datacenter node");
-            }
             if (templateVmId == null || templateVmId.isEmpty()) {
                 return FormValidation.error("Please select a template VM ID");
             }

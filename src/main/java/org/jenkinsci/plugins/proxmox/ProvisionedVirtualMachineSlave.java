@@ -217,7 +217,7 @@ public class ProvisionedVirtualMachineSlave extends AbstractCloudSlave implement
     /** Stops and deletes the cloned virtual machine of this agent; failures are logged. */
     private void deleteVirtualMachine() {
         Datacenter datacenter = Datacenter.findByDescription(datacenterDescription);
-        if (datacenter == null || virtualMachineId == null || datacenterNode == null) {
+        if (datacenter == null || virtualMachineId == null) {
             return;
         }
         try {

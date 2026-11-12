@@ -44,7 +44,7 @@ public class CloneVirtualMachine extends ProxmoxBuildStep {
             Integer targetVmIdInt = parseTargetVmId();
             
             // Check if target VM ID already exists
-            if (proxmoxApi.getQemuMachines(datacenterNode).containsKey(targetVmIdInt)) {
+            if (proxmoxApi.getQemuMachines().containsKey(targetVmIdInt)) {
                 throw new AbortException("Target VM ID " + targetVmId + " already exists");
             }
             

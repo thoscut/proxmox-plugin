@@ -119,7 +119,6 @@ public class RevertToSnapshot extends ProxmoxBuildStep {
             items.add("[Select]", "");
             
             if (datacenterDescription != null && !datacenterDescription.isEmpty() &&
-                datacenterNode != null && !datacenterNode.isEmpty() &&
                 vmId != null && !vmId.isEmpty()) {
                 
                 try {

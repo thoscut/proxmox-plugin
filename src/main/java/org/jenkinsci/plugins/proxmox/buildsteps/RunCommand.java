@@ -265,9 +265,6 @@ public class RunCommand extends ProxmoxBuildStep {
             if (datacenterDescription == null || datacenterDescription.trim().isEmpty()) {
                 return FormValidation.error("Please select a datacenter");
             }
-            if (datacenterNode == null || datacenterNode.trim().isEmpty()) {
-                return FormValidation.error("Please select a node");
-            }
             if (vmId == null || vmId.trim().isEmpty()) {
                 return FormValidation.error("Please enter a VM ID");
             }

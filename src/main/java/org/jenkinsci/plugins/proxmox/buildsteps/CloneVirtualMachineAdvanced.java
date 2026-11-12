@@ -52,7 +52,7 @@ public class CloneVirtualMachineAdvanced extends ProxmoxBuildStep {
             Integer targetVmIdInt = parseTargetVmId();
 
             // Check if target VM ID already exists
-            if (proxmoxApi.getQemuMachines(datacenterNode).containsKey(targetVmIdInt)) {
+            if (proxmoxApi.getQemuMachines().containsKey(targetVmIdInt)) {
                 throw new AbortException("Target VM ID " + targetVmId + " already exists");
             }
 
@@ -81,7 +81,7 @@ public class CloneVirtualMachineAdvanced extends ProxmoxBuildStep {
             }
 
             // Verify clone was created
-            if (!proxmoxApi.getQemuMachines(datacenterNode).containsKey(targetVmIdInt)) {
+            if (!proxmoxApi.getQemuMachines().containsKey(targetVmIdInt)) {
                 throw new AbortException("Cloned VM was not found after creation");
             }
 
@@ -203,7 +203,6 @@ public class CloneVirtualMachineAdvanced extends ProxmoxBuildStep {
             items.add("[None - Clone current state]", "");
 
             if (datacenterDescription != null && !datacenterDescription.isEmpty() &&
-                datacenterNode != null && !datacenterNode.isEmpty() &&
                 vmId != null && !vmId.isEmpty()) {
 
                 try {

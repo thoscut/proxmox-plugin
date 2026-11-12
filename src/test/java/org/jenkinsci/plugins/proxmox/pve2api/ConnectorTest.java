@@ -90,7 +90,8 @@ class ConnectorTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"pve/qemu/999/status/stop?", "pve node", "-pve", "", "pve%2Fx"})
+    // An empty node name is valid: the node is then looked up, see ConnectorHttpTest.
+    @ValueSource(strings = {"pve/qemu/999/status/stop?", "pve node", "-pve", "pve%2Fx"})
     void invalid_node_names_are_rejected(String node) {
         try (Connector connector = new Connector("localhost", "user", "pve", null, false)) {
             assertThrows(ProxmoxException.class, () -> connector.startQemuMachine(node, 100));

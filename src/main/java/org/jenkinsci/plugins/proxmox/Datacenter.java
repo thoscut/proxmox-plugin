@@ -619,23 +619,25 @@ public class Datacenter extends Cloud {
     }
 
     /**
-     * @return the QEMU virtual machines of a node, keyed and sorted by VM id, with their names as values.
+     * @param node the node to list; if empty, the virtual machines of all nodes are listed
+     * @return the QEMU virtual machines, keyed and sorted by VM id, with their names as values.
      */
     public Map<Integer, String> getQemuMachines(String node) {
-        if (node == null || node.isEmpty()) {
-            return Collections.emptyMap();
-        }
-
         try {
             return proxmoxInstance().getQemuMachines(node);
         } catch (LoginException | ProxmoxException | RuntimeException e) {
-            LOGGER.log(Level.WARNING, "Could not list virtual machines of node " + node, e);
+            LOGGER.log(Level.WARNING, "Could not list virtual machines of " + describeNode(node), e);
             return Collections.emptyMap();
         }
     }
 
+    private String describeNode(String node) {
+        return node == null || node.isEmpty() ? getDatacenterDescription() : "node " + node;
+    }
+
+    /** @param node the node the virtual machine is expected on; may be empty, it is looked up anyway */
     public List<String> getQemuMachineSnapshots(String node, Integer vmid) {
-        if (node == null || node.isEmpty() || vmid == null || vmid < 1) {
+        if (vmid == null || vmid < 1) {
             return new ArrayList<>();
         }
 
@@ -872,13 +874,10 @@ public class Datacenter extends Cloud {
             Connector proxmoxApi, ProxmoxCloudSlaveTemplate template, Map<Integer, ProxmoxAgent> jenkinsVMs)
             throws LoginException, IOException {
 
+        // Only a hint. The clones are searched on all nodes, because they may have been migrated.
         String nodeName = template.getDatacenterNode();
-        if (nodeName == null || nodeName.isEmpty()) {
-            LOGGER.log(Level.FINE, "Template {0} has no datacenter node configured", template.getTemplateName());
-            return;
-        }
 
-        for (Map.Entry<Integer, String> entry : proxmoxApi.getQemuMachines(nodeName).entrySet()) {
+        for (Map.Entry<Integer, String> entry : proxmoxApi.getQemuMachines().entrySet()) {
             Integer vmId = entry.getKey();
             String vmName = entry.getValue();
 
@@ -918,8 +917,8 @@ public class Datacenter extends Cloud {
                 }
             }
 
-            LOGGER.log(Level.INFO, "Deleting orphaned VM in Proxmox: {0} (ID: {1}) on node {2}", new Object[] {
-                vmName, String.valueOf(vmId), nodeName
+            LOGGER.log(Level.INFO, "Deleting orphaned VM in Proxmox: {0} (ID: {1})", new Object[] {
+                vmName, String.valueOf(vmId)
             });
 
             try {
@@ -980,17 +979,17 @@ public class Datacenter extends Cloud {
                 return false;
             }
 
-            String nodeName = vmSlave.getDatacenterNode();
             Integer vmId = vmSlave.getVirtualMachineId();
-            if (nodeName == null || vmId == null) {
-                LOGGER.log(Level.WARNING, "Node {0} has invalid datacenter node or VM ID", vmSlave.getNodeName());
+            if (vmId == null) {
+                LOGGER.log(Level.WARNING, "Node {0} has no VM ID", vmSlave.getNodeName());
                 return true;
             }
 
-            boolean exists = proxmoxInstance().getQemuMachines(nodeName).containsKey(vmId);
+            // Searched on all nodes: a virtual machine that was migrated is not missing
+            boolean exists = proxmoxInstance().getQemuMachines().containsKey(vmId);
             if (!exists) {
-                LOGGER.log(Level.INFO, "VM {0} (ID: {1}) on node {2} is missing from Proxmox", new Object[] {
-                    vmSlave.getNodeName(), String.valueOf(vmId), nodeName
+                LOGGER.log(Level.INFO, "VM {0} (ID: {1}) is missing from Proxmox", new Object[] {
+                    vmSlave.getNodeName(), String.valueOf(vmId)
                 });
             }
             return !exists;
