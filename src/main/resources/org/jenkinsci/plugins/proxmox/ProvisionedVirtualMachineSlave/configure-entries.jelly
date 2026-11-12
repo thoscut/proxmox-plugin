@@ -1,0 +1,38 @@
+<?jelly escape-by-default='true'?>
+<!--
+  A provisioned agent is defined by its template, so its settings are only shown.
+  The number of executors is submitted, because Jenkins validates it for every agent.
+-->
+<j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form">
+    <f:block>
+        ${%This agent was provisioned from a template of the Proxmox datacenter and cannot be changed here}
+    </f:block>
+
+    <f:entry title="${%Description}">
+        <f:readOnlyTextbox value="${it.nodeDescription}"/>
+    </f:entry>
+
+    <f:entry title="${%Datacenter}">
+        <f:readOnlyTextbox value="${it.datacenterDescription}"/>
+    </f:entry>
+
+    <f:entry title="${%Datacenter Node}">
+        <f:readOnlyTextbox value="${it.datacenterNode}"/>
+    </f:entry>
+
+    <f:entry title="${%Virtual Machine}">
+        <f:readOnlyTextbox value="${it.virtualMachineId}"/>
+    </f:entry>
+
+    <f:entry title="${%Number of executors}">
+        <f:readOnlyTextbox name="numExecutors" value="${it.numExecutors}"/>
+    </f:entry>
+
+    <f:entry title="${%Remote root directory}">
+        <f:readOnlyTextbox value="${it.remoteFS}"/>
+    </f:entry>
+
+    <f:entry title="${%Labels}">
+        <f:readOnlyTextbox value="${it.labelString}"/>
+    </f:entry>
+</j:jelly>

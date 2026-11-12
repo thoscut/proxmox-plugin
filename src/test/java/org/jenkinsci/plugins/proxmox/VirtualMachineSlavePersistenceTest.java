@@ -88,22 +88,88 @@ class VirtualMachineSlavePersistenceTest {
         assertThat(reloaded.getNodeDescription(), is("description"));
     }
 
+    @Test
+    void exposes_its_settings(JenkinsRule r) throws Exception {
+        VirtualMachineSlave slave = createSlave(new JNLPLauncher());
+
+        assertThat(slave.getDatacenterDescription(), is("user@pve - host"));
+        assertThat(slave.getDatacenterNode(), is("pve1"));
+        assertThat(slave.getVirtualMachineId(), is(100));
+        assertThat(slave.getSnapshotName(), is("clean"));
+        assertThat(slave.getStartVM(), is(true));
+        assertThat(slave.getStartupWaitingPeriodSeconds(), is(30));
+        assertThat(slave.getRevertPolicy(), is(RevertPolicy.AFTER_CONNECT));
+    }
+
     /**
      * Only provisioned agents own (and delete) their virtual machine, so this must not get lost
      * or appear out of nowhere when Jenkins restarts.
      */
     @Test
     void ownership_of_the_virtual_machine_survives_save_and_reload(JenkinsRule r) throws Exception {
-        VirtualMachineSlave manual = createSlave(new JNLPLauncher());
-        VirtualMachineSlave provisioned = createSlave(new JNLPLauncher());
-        provisioned.setProvisioningId(new ProvisioningActivity.Id("cloud", "template", "vm-agent"));
+        ProvisioningActivity.Id id = new ProvisioningActivity.Id("cloud", "template", "vm-agent");
+        ProvisionedVirtualMachineSlave provisioned = new ProvisionedVirtualMachineSlave(
+                "vm-agent",
+                "description",
+                "/home/jenkins",
+                "1",
+                Node.Mode.NORMAL,
+                "proxmox",
+                new JNLPLauncher(),
+                new RetentionStrategy.Always(),
+                Collections.emptyList(),
+                "user@pve - host",
+                "pve1",
+                100,
+                "clean",
+                true,
+                30);
+        provisioned.setProvisioningId(id);
 
-        VirtualMachineSlave manualReloaded =
-                (VirtualMachineSlave) Jenkins.XSTREAM2.fromXML(Jenkins.XSTREAM2.toXML(manual));
-        VirtualMachineSlave provisionedReloaded =
-                (VirtualMachineSlave) Jenkins.XSTREAM2.fromXML(Jenkins.XSTREAM2.toXML(provisioned));
+        Object manualReloaded = Jenkins.XSTREAM2.fromXML(Jenkins.XSTREAM2.toXML(createSlave(new JNLPLauncher())));
+        Object provisionedReloaded = Jenkins.XSTREAM2.fromXML(Jenkins.XSTREAM2.toXML(provisioned));
 
-        assertThat(manualReloaded.isProvisionedByCloud(), is(false));
-        assertThat(provisionedReloaded.isProvisionedByCloud(), is(true));
+        assertThat(manualReloaded, instanceOf(VirtualMachineSlave.class));
+        assertThat(provisionedReloaded, instanceOf(ProvisionedVirtualMachineSlave.class));
+        ProvisionedVirtualMachineSlave reloaded = (ProvisionedVirtualMachineSlave) provisionedReloaded;
+        assertThat(reloaded.getId(), is(id));
+        assertThat(reloaded.getDatacenterDescription(), is("user@pve - host"));
+        assertThat(reloaded.getDatacenterNode(), is("pve1"));
+        assertThat(reloaded.getVirtualMachineId(), is(100));
+        assertThat(reloaded.getLauncher(), instanceOf(VirtualMachineLauncher.class));
+    }
+
+    /**
+     * Older versions stored provisioned agents as {@link VirtualMachineSlave}s that were marked by
+     * their provisioning id. They still own their cloned virtual machine after the update.
+     */
+    @Test
+    void provisioned_agents_of_older_versions_become_provisioned_agents(JenkinsRule r) throws Exception {
+        ProvisioningActivity.Id id = new ProvisioningActivity.Id("cloud", "template", "vm-agent");
+        String idXml = Jenkins.XSTREAM2.toXML(id);
+        String idFields = idXml.substring(idXml.indexOf('>') + 1, idXml.lastIndexOf("</"));
+        String slaveElement = "</" + VirtualMachineSlave.class.getName() + ">";
+        String oldXml = Jenkins.XSTREAM2
+                .toXML(createSlave(new JNLPLauncher()))
+                .replace(slaveElement, "<provisioningId>" + idFields + "</provisioningId>" + slaveElement);
+        assertThat(oldXml.contains("<provisioningId>"), is(true));
+
+        Object loaded = Jenkins.XSTREAM2.fromXML(oldXml);
+
+        assertThat(loaded, instanceOf(ProvisionedVirtualMachineSlave.class));
+        ProvisionedVirtualMachineSlave migrated = (ProvisionedVirtualMachineSlave) loaded;
+        assertThat(migrated.getId(), is(id));
+        assertThat(migrated.getNodeName(), is("vm-agent"));
+        assertThat(migrated.getNodeDescription(), is("description"));
+        assertThat(migrated.getRemoteFS(), is("/home/jenkins"));
+        assertThat(migrated.getNumExecutors(), is(1));
+        assertThat(migrated.getLabelString(), is("proxmox"));
+        assertThat(migrated.getRetentionStrategy(), instanceOf(RetentionStrategy.Always.class));
+        assertThat(migrated.getDatacenterDescription(), is("user@pve - host"));
+        assertThat(migrated.getDatacenterNode(), is("pve1"));
+        assertThat(migrated.getVirtualMachineId(), is(100));
+        VirtualMachineLauncher launcher = (VirtualMachineLauncher) migrated.getLauncher();
+        assertThat(launcher.getLauncher(), instanceOf(JNLPLauncher.class));
+        assertThat(launcher.getVirtualMachineId(), is(100));
     }
 }

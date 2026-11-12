@@ -2,12 +2,12 @@ package org.jenkinsci.plugins.proxmox;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.Executor;
-import hudson.model.Node;
 import hudson.model.Queue;
 import hudson.model.Result;
-import hudson.slaves.AbstractCloudComputer;
+import hudson.model.Slave;
 import hudson.slaves.ComputerLauncher;
 import hudson.slaves.OfflineCause;
+import hudson.slaves.SlaveComputer;
 import hudson.util.Futures;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -15,10 +15,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import jenkins.model.CauseOfInterruption;
-import org.jenkinsci.plugins.cloudstats.ProvisioningActivity;
-import org.jenkinsci.plugins.cloudstats.TrackedItem;
 
-public class VirtualMachineSlaveComputer extends AbstractCloudComputer<VirtualMachineSlave> implements TrackedItem {
+/**
+ * The computer of a {@link VirtualMachineSlave}. It implements the revert policies that roll the
+ * virtual machine back around every build.
+ */
+public class VirtualMachineSlaveComputer extends SlaveComputer {
 
     private static final Logger LOGGER = Logger.getLogger(VirtualMachineSlaveComputer.class.getName());
 
@@ -27,12 +29,15 @@ public class VirtualMachineSlaveComputer extends AbstractCloudComputer<VirtualMa
     /** The executor thread that is reverting the snapshot; only it may relaunch the agent meanwhile. */
     private volatile Thread revertingThread;
 
-    /** Kept for the cloud statistics, which ask for the id before the node is known to Jenkins. */
-    private final VirtualMachineSlave slave;
-
     public VirtualMachineSlaveComputer(VirtualMachineSlave slave) {
         super(slave);
-        this.slave = slave;
+    }
+
+    @Override
+    @CheckForNull
+    public VirtualMachineSlave getNode() {
+        Slave node = super.getNode();
+        return node instanceof VirtualMachineSlave ? (VirtualMachineSlave) node : null;
     }
 
     /**
@@ -41,15 +46,24 @@ public class VirtualMachineSlaveComputer extends AbstractCloudComputer<VirtualMa
      */
     @Override
     public void tryReconnect() {
-        if (!isAcceptingTasks()) {
-            getListener().getLogger().println("INFO: Node is disabled, skipping reconnection attempt");
-            return;
-        }
-        if (isOffline() && getOfflineCause() instanceof OfflineCause.UserCause) {
-            getListener().getLogger().println("INFO: Node is manually offline, skipping reconnection attempt");
+        String reason = reasonToStayOffline(this);
+        if (reason != null) {
+            getListener().getLogger().println("INFO: " + reason + ", skipping reconnection attempt");
             return;
         }
         super.tryReconnect();
+    }
+
+    /** @return why a user wants the agent to stay offline, or {@code null} if it may be relaunched. */
+    @CheckForNull
+    static String reasonToStayOffline(SlaveComputer computer) {
+        if (!computer.isAcceptingTasks()) {
+            return "Node is disabled";
+        }
+        if (computer.isOffline() && computer.getOfflineCause() instanceof OfflineCause.UserCause) {
+            return "Node is manually offline";
+        }
+        return null;
     }
 
     /**
@@ -69,11 +83,10 @@ public class VirtualMachineSlaveComputer extends AbstractCloudComputer<VirtualMa
     public void taskAccepted(Executor executor, Queue.Task task) {
         super.taskAccepted(executor, task);
 
-        final Node node = getNode();
-        if (!(node instanceof VirtualMachineSlave)) {
+        final VirtualMachineSlave slave = getNode();
+        if (slave == null) {
             return;
         }
-        final VirtualMachineSlave slave = (VirtualMachineSlave) node;
         final ComputerLauncher nodeLauncher = slave.getLauncher();
         if (!(nodeLauncher instanceof VirtualMachineLauncher)) {
             return;
@@ -138,26 +151,10 @@ public class VirtualMachineSlaveComputer extends AbstractCloudComputer<VirtualMa
     }
 
     private void afterTask() {
-        final Node node = getNode();
-        if (!(node instanceof VirtualMachineSlave)) {
+        final VirtualMachineSlave vmSlave = getNode();
+        if (vmSlave == null) {
             return;
         }
-        final VirtualMachineSlave vmSlave = (VirtualMachineSlave) node;
-
-        if (vmSlave.getLimitedBuildsCount() > 0) {
-            int limit = vmSlave.getLimitedBuildsCount();
-            int executed = vmSlave.getBuildsExecuted() + 1;
-            getListener().getLogger().println("INFO: Build " + executed + " of " + limit + " completed on this agent");
-            if (executed >= limit) {
-                getListener().getLogger().println("INFO: Limited builds threshold reached, agent will be deprovisioned");
-            }
-            // Removes the agent once the limit is reached, so there is nothing left to revert then.
-            vmSlave.incrementBuildsExecuted();
-            if (executed >= limit) {
-                return;
-            }
-        }
-
         final ComputerLauncher nodeLauncher = vmSlave.getLauncher();
         if (!(nodeLauncher instanceof VirtualMachineLauncher)) {
             return;
@@ -243,18 +240,6 @@ public class VirtualMachineSlaveComputer extends AbstractCloudComputer<VirtualMa
         }
     }
 
-    /** {@link TrackedItem} implementation for the cloud statistics plugin. */
-    @Override
-    @CheckForNull
-    public ProvisioningActivity.Id getId() {
-        Node node = getNode();
-        if (node instanceof VirtualMachineSlave) {
-            return ((VirtualMachineSlave) node).getId();
-        }
-        // Computers that are not yet added to Jenkins have no node
-        return slave != null ? slave.getId() : null;
-    }
-
     // Details of the virtual machine for the status page
 
     public String getVmId() {
@@ -294,20 +279,5 @@ public class VirtualMachineSlaveComputer extends AbstractCloudComputer<VirtualMa
     public int getStartupWaitTime() {
         VirtualMachineSlave node = getNode();
         return node != null ? node.getStartupWaitingPeriodSeconds() : 0;
-    }
-
-    public Integer getLimitedBuildsCount() {
-        VirtualMachineSlave node = getNode();
-        return node != null ? node.getLimitedBuildsCount() : null;
-    }
-
-    public Integer getBuildsExecuted() {
-        VirtualMachineSlave node = getNode();
-        return node != null ? node.getBuildsExecuted() : null;
-    }
-
-    public boolean hasLimitedBuilds() {
-        VirtualMachineSlave node = getNode();
-        return node != null && node.getLimitedBuildsCount() > 0;
     }
 }

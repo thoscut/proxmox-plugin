@@ -1,0 +1,12 @@
+jenkins:
+  systemMessage: "Hello World"
+  agentProtocols:
+    - "JNLP4-connect"
+  clouds:
+    - datacenter:
+        hostname: "company-proxmox"
+        ignoreSSL: true
+        password: "proxmox-pass"
+        realm: "pve"
+        username: "proxmox-user"
+  nodes: []

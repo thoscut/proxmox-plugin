@@ -148,8 +148,10 @@ jenkins:
 virtual machine launcher. `delegateLauncher` is accepted as an alias.
 `startVM` defaults to `false` when omitted.
 
-Proxmox agents are cloud agents for Jenkins, so Configuration as Code reads them from the YAML
-file but does not include them in an export.
+Only agents that are bound to an existing virtual machine are configured this way. They are
+included in an export, and removed when a configuration that no longer lists them is applied.
+Agents that a template provisioned on demand are cloud agents: Configuration as Code neither
+exports nor removes them.
 
 ## Manually Installing
  1. Clone this repo.

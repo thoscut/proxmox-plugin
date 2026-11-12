@@ -1,13 +1,10 @@
 package org.jenkinsci.plugins.proxmox;
 
-import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.Extension;
 import hudson.Util;
 import hudson.model.Computer;
 import hudson.model.Descriptor;
-import hudson.model.TaskListener;
-import hudson.remoting.VirtualChannel;
-import hudson.slaves.AbstractCloudSlave;
+import hudson.model.Slave;
 import hudson.slaves.Cloud;
 import hudson.slaves.ComputerLauncher;
 import hudson.slaves.NodeProperty;
@@ -23,7 +20,6 @@ import javax.security.auth.login.LoginException;
 import jenkins.model.Jenkins;
 import kong.unirest.json.JSONObject;
 import org.jenkinsci.plugins.cloudstats.ProvisioningActivity;
-import org.jenkinsci.plugins.cloudstats.TrackedItem;
 import org.jenkinsci.plugins.proxmox.VirtualMachineLauncher.RevertPolicy;
 import org.jenkinsci.plugins.proxmox.pve2api.Connector;
 import org.kohsuke.stapler.AncestorInPath;
@@ -33,11 +29,14 @@ import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.verb.POST;
 
 /**
- * An agent running in a Proxmox virtual machine. It is either configured by hand for an existing
- * virtual machine, or provisioned on demand by a {@link ProxmoxCloudSlaveTemplate}, which clones a
- * template for it; only the latter owns its virtual machine and deletes it when the agent is removed.
+ * An agent that was bound by hand to an existing Proxmox virtual machine. The virtual machine is
+ * started, reverted and shut down for the agent, but it is never deleted.
+ *
+ * <p>Agents that the cloud provisions on demand are {@link ProvisionedVirtualMachineSlave}s. This
+ * class deliberately is no {@link hudson.slaves.AbstractCloudSlave}: Configuration as Code neither
+ * exports cloud agents nor removes them when they are missing from the applied configuration.
  */
-public class VirtualMachineSlave extends AbstractCloudSlave implements TrackedItem {
+public class VirtualMachineSlave extends Slave implements ProxmoxAgent {
 
     private static final long serialVersionUID = 1L;
 
@@ -50,11 +49,13 @@ public class VirtualMachineSlave extends AbstractCloudSlave implements TrackedIt
     private Boolean startVM;
     private int startupWaitingPeriodSeconds;
     private RevertPolicy revertPolicy;
-    private transient int limitedBuildsCount = 0;
-    private transient int buildsExecuted = 0;
 
-    /** Set for agents provisioned by the cloud; identifies them for the cloud statistics plugin. */
-    private ProvisioningActivity.Id provisioningId;
+    /**
+     * Only read from the configuration of older versions, in which provisioned agents were instances
+     * of this class and marked by this id. See {@link #readResolve()}.
+     */
+    @Deprecated
+    private transient ProvisioningActivity.Id provisioningId;
 
     @DataBoundConstructor
     public VirtualMachineSlave(
@@ -88,7 +89,7 @@ public class VirtualMachineSlave extends AbstractCloudSlave implements TrackedIt
                         startupWaitingPeriodSeconds,
                         revertPolicy));
         setNodeDescription(nodeDescription);
-        setNumExecutors(Util.tryParseNumber(numExecutors, 1).intValue());
+        setNumExecutors(parseExecutors(numExecutors));
         setMode(mode);
         setLabelString(labelString);
         if (retentionStrategy != null) {
@@ -107,6 +108,12 @@ public class VirtualMachineSlave extends AbstractCloudSlave implements TrackedIt
         checkExecutorsForRevertPolicy(getNumExecutors(), revertPolicy);
     }
 
+    /** @return the number of executors that was entered in a form; one if it is no number. */
+    static int parseExecutors(String numExecutors) {
+        Number parsed = Util.tryParseNumber(numExecutors, 1);
+        return parsed == null ? 1 : parsed.intValue();
+    }
+
     /**
      * Reverting before every job disconnects the agent and rolls the whole VM back, which would
      * kill any build running on another executor of the same agent.
@@ -119,14 +126,17 @@ public class VirtualMachineSlave extends AbstractCloudSlave implements TrackedIt
         }
     }
 
+    @Override
     public String getDatacenterDescription() {
         return datacenterDescription;
     }
 
+    @Override
     public String getDatacenterNode() {
         return datacenterNode;
     }
 
+    @Override
     public Integer getVirtualMachineId() {
         return virtualMachineId;
     }
@@ -176,128 +186,29 @@ public class VirtualMachineSlave extends AbstractCloudSlave implements TrackedIt
         super.setLauncher(launcher);
     }
 
-    public void setLimitedBuildsCount(int count) {
-        this.limitedBuildsCount = count;
-    }
-
-    public int getLimitedBuildsCount() {
-        return limitedBuildsCount;
-    }
-
-    public int getBuildsExecuted() {
-        return buildsExecuted;
-    }
-
-    /** {@link TrackedItem} implementation for the cloud statistics plugin. */
-    @Override
-    @CheckForNull
-    public ProvisioningActivity.Id getId() {
-        return provisioningId;
-    }
-
-    public void setProvisioningId(ProvisioningActivity.Id id) {
-        this.provisioningId = id;
-    }
-
-    /**
-     * @return whether the cloud cloned the virtual machine for this agent. Only then the virtual
-     *     machine belongs to the agent and may be deleted together with it; a virtual machine that
-     *     was assigned to an agent by hand is never deleted.
-     */
-    public boolean isProvisionedByCloud() {
-        return provisioningId != null;
-    }
-
-    /**
-     * Counts a finished build and removes the agent, together with its cloned virtual machine,
-     * once the configured number of builds was reached.
-     */
-    public void incrementBuildsExecuted() {
-        buildsExecuted++;
-        if (limitedBuildsCount <= 0 || buildsExecuted < limitedBuildsCount) {
-            return;
-        }
-        try {
-            if (isProvisionedByCloud()) {
-                deleteVirtualMachine();
-            }
-
-            // Close the channel before removing the node to prevent WebSocket timeout errors
-            Computer computer = toComputer();
-            VirtualChannel channel = computer == null ? null : computer.getChannel();
-            if (channel != null) {
-                try {
-                    channel.close();
-                } catch (IOException e) {
-                    LOGGER.log(Level.WARNING, "Failed to close the channel of " + getNodeName() + " before removal", e);
-                }
-            }
-
-            Jenkins.get().removeNode(this);
-            LOGGER.log(Level.INFO, "Agent {0} deprovisioned after {1} builds", new Object[] {
-                getNodeName(), limitedBuildsCount
-            });
-        } catch (IOException | RuntimeException e) {
-            // Log, but do not fail the build
-            LOGGER.log(Level.WARNING, "Failed to deprovision agent " + getNodeName() + " after limited builds", e);
-        }
-    }
-
-    /** Stops and deletes the cloned virtual machine of this agent; failures are logged. */
-    private void deleteVirtualMachine() {
-        Datacenter datacenter = Datacenter.findByDescription(datacenterDescription);
-        if (datacenter == null || virtualMachineId == null || datacenterNode == null) {
-            return;
-        }
-        try {
-            Connector pveApi = datacenter.proxmoxInstance();
-            if (pveApi.isQemuMachineRunning(datacenterNode, virtualMachineId)) {
-                LOGGER.log(Level.INFO, "Stopping VM {0} before deletion", virtualMachineId.toString());
-                String stopTask = pveApi.stopQemuMachine(datacenterNode, virtualMachineId);
-                JSONObject stopResult = pveApi.waitForTaskToFinish(datacenterNode, stopTask);
-                LOGGER.log(Level.INFO, "VM {0} stop finished: {1}", new Object[] {
-                    virtualMachineId.toString(), VirtualMachineLauncher.describe(stopResult)
-                });
-            }
-            String deleteTask = pveApi.deleteQemuMachine(datacenterNode, virtualMachineId);
-            LOGGER.log(Level.INFO, "VM {0} deletion initiated (task: {1})", new Object[] {
-                virtualMachineId.toString(), deleteTask
-            });
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            LOGGER.log(Level.WARNING, "Interrupted while deleting VM " + virtualMachineId, e);
-        } catch (LoginException | IOException | RuntimeException e) {
-            LOGGER.log(Level.WARNING, "Failed to stop/delete VM " + virtualMachineId + " from Proxmox", e);
-        }
-    }
-
     @Override
     public VirtualMachineSlaveComputer createComputer() {
-        // The computer implements the "Before every job" revert in taskAccepted().
+        // The computer implements the revert policies "Before every job" and "After every job".
         return new VirtualMachineSlaveComputer(this);
     }
 
     /**
-     * Called when the agent is deleted. A virtual machine that the cloud cloned for this agent is
-     * stopped and deleted; one that was assigned by hand is left alone.
+     * Older versions stored provisioned agents as instances of this class. They own their cloned
+     * virtual machine, so they are turned into {@link ProvisionedVirtualMachineSlave}s when loaded.
      */
     @Override
-    protected void _terminate(TaskListener listener) throws IOException, InterruptedException {
-        if (!isProvisionedByCloud()) {
-            return;
+    protected Object readResolve() {
+        Object resolved = super.readResolve();
+        if (provisioningId == null) {
+            return resolved;
         }
-        Datacenter datacenter = Datacenter.findByDescription(datacenterDescription);
-        if (datacenter == null) {
-            listener.getLogger().println("Warning: Cannot terminate - datacenter not found: " + datacenterDescription);
-            return;
+        try {
+            return ProvisionedVirtualMachineSlave.migrate(this, provisioningId);
+        } catch (IOException | Descriptor.FormException e) {
+            // Kept as an agent that never deletes its virtual machine, which is the safe side.
+            LOGGER.log(Level.WARNING, "Could not load " + getNodeName() + " as a provisioned agent", e);
+            return resolved;
         }
-        Computer computer = toComputer();
-        if (computer == null) {
-            listener.getLogger().println("Warning: Cannot terminate - computer is null");
-            return;
-        }
-        listener.getLogger().println("Terminating VM " + virtualMachineId + " through datacenter");
-        datacenter.terminate(computer);
     }
 
     @Extension

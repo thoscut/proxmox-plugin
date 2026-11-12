@@ -8,6 +8,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.not;
+import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.core.Is.is;
 import static org.jvnet.hudson.test.JenkinsMatchers.hasPlainText;
 
@@ -16,6 +17,7 @@ import hudson.model.Node.Mode;
 import hudson.slaves.JNLPLauncher;
 import hudson.slaves.RetentionStrategy;
 import hudson.util.Secret;
+import io.jenkins.plugins.casc.ConfigurationAsCode;
 import io.jenkins.plugins.casc.ConfigurationContext;
 import io.jenkins.plugins.casc.ConfiguratorRegistry;
 import io.jenkins.plugins.casc.misc.ConfiguredWithCode;
@@ -23,13 +25,14 @@ import io.jenkins.plugins.casc.misc.JenkinsConfiguredWithCodeRule;
 import io.jenkins.plugins.casc.misc.junit.jupiter.WithJenkinsConfiguredWithCode;
 import io.jenkins.plugins.casc.model.Mapping;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import org.jenkinsci.plugins.proxmox.Datacenter;
+import org.jenkinsci.plugins.proxmox.ProvisionedVirtualMachineSlave;
 import org.jenkinsci.plugins.proxmox.VirtualMachineLauncher;
 import org.jenkinsci.plugins.proxmox.VirtualMachineLauncher.RevertPolicy;
 import org.jenkinsci.plugins.proxmox.VirtualMachineSlave;
 import org.jenkinsci.plugins.proxmox.VirtualMachineSlaveComputer;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 @WithJenkinsConfiguredWithCode
@@ -100,9 +103,6 @@ class ConfigurationAsCodeTest {
     }
 
     @Test
-    @Disabled("Since the merge of dynamic provisioning every Proxmox agent is an AbstractCloudSlave,"
-            + " and Configuration as Code does not export cloud agents. Enable again once manually"
-            + " configured agents and provisioned agents are separate classes.")
     @ConfiguredWithCode("configuration-as-code.yml")
     void should_export_nodes_with_the_wrapped_launcher(JenkinsConfiguredWithCodeRule r) throws Exception {
         ConfiguratorRegistry registry = ConfiguratorRegistry.get();
@@ -110,8 +110,62 @@ class ConfigurationAsCodeTest {
         String exported = toYamlString(getJenkinsRoot(context).get("nodes"));
 
         assertThat(exported, not(containsString("FAILED TO EXPORT")));
+        assertThat(exported, containsString("name: \"proxmox-vm\""));
         assertThat(exported, containsString("virtualMachineLauncher:"));
         assertThat(exported, containsString("snapshotName: \"proxmox-snapshot\""));
+    }
+
+    /**
+     * Agents that a template provisioned are cloud agents: they come and go with the load, so they
+     * are not part of an export, and applying a configuration that does not list them keeps them.
+     */
+    @Test
+    @ConfiguredWithCode("configuration-as-code.yml")
+    void should_neither_export_nor_remove_provisioned_agents(JenkinsConfiguredWithCodeRule r) throws Exception {
+        r.jenkins.addNode(new ProvisionedVirtualMachineSlave(
+                "proxmox-clone",
+                "Provisioned agent",
+                "/home/jenkins",
+                "1",
+                Mode.NORMAL,
+                "proxmox-label",
+                new JNLPLauncher(),
+                RetentionStrategy.NOOP,
+                Collections.emptyList(),
+                "proxmox-user@pve - company-proxmox",
+                "proxmox-node",
+                4711,
+                "current",
+                false,
+                0));
+
+        ConfiguratorRegistry registry = ConfiguratorRegistry.get();
+        ConfigurationContext context = new ConfigurationContext(registry);
+        String exported = toYamlString(getJenkinsRoot(context).get("nodes"));
+        assertThat(exported, not(containsString("FAILED TO EXPORT")));
+        assertThat(exported, containsString("proxmox-vm"));
+        assertThat(exported, not(containsString("proxmox-clone")));
+
+        ConfigurationAsCode.get()
+                .configure(getClass().getResource("configuration-as-code.yml").toExternalForm());
+
+        assertThat(r.jenkins.getNode("proxmox-clone"), instanceOf(ProvisionedVirtualMachineSlave.class));
+        assertThat(r.jenkins.getNode("proxmox-vm"), instanceOf(VirtualMachineSlave.class));
+    }
+
+    /** An agent that was configured as code is removed when the applied configuration lacks it. */
+    @Test
+    @ConfiguredWithCode("configuration-as-code.yml")
+    void should_remove_agents_that_are_missing_from_the_applied_configuration(JenkinsConfiguredWithCodeRule r)
+            throws Exception {
+        assertThat(r.jenkins.getNode("proxmox-vm"), instanceOf(VirtualMachineSlave.class));
+
+        ConfigurationAsCode.get()
+                .configure(getClass()
+                        .getResource("configuration-as-code-without-nodes.yml")
+                        .toExternalForm());
+
+        assertThat(r.jenkins.getNode("proxmox-vm"), nullValue());
     }
 
     @Test

@@ -122,19 +122,6 @@
                     <td>${it.startupWaitTime} seconds</td>
                 </tr>
             </j:if>
-            <j:if test="${it.hasLimitedBuilds()}">
-                <tr>
-                    <td>Limited Builds:</td>
-                    <td>
-                        <span class="proxmox-badge proxmox-badge-warning">
-                            ${it.buildsExecuted} / ${it.limitedBuildsCount}
-                        </span>
-                        <j:if test="${it.buildsExecuted >= it.limitedBuildsCount}">
-                            <span style="color: #f44336; margin-left: 8px;">⚠ Limit reached</span>
-                        </j:if>
-                    </td>
-                </tr>
-            </j:if>
         </table>
     </div>
 

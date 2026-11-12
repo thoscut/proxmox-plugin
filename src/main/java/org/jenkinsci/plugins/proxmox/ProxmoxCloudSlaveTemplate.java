@@ -29,7 +29,6 @@ import jenkins.model.Jenkins;
 import kong.unirest.json.JSONObject;
 
 import org.jenkinsci.plugins.proxmox.pve2api.Connector;
-import org.jenkinsci.plugins.proxmox.VirtualMachineLauncher.RevertPolicy;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.DataBoundSetter;
 import org.kohsuke.stapler.QueryParameter;
@@ -135,12 +134,12 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
         return labelSet;
     }
 
-    public VirtualMachineSlave provision(Datacenter datacenter) throws Exception {
+    public ProvisionedVirtualMachineSlave provision(Datacenter datacenter) throws Exception {
         // For backward compatibility - generate a name if not provided
         return provision(datacenter, null);
     }
 
-    public VirtualMachineSlave provision(Datacenter datacenter, String plannedNodeName) throws Exception {
+    public ProvisionedVirtualMachineSlave provision(Datacenter datacenter, String plannedNodeName) throws Exception {
         // Validate required configuration
         if (templateVmId == null || templateVmId.trim().isEmpty()) {
             String errorMessage = "Template VM ID is not configured for template '" + templateName +
@@ -217,7 +216,7 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
                 }
             }
 
-            VirtualMachineSlave slave = new VirtualMachineSlave(
+            ProvisionedVirtualMachineSlave slave = new ProvisionedVirtualMachineSlave(
                 cloneName,
                 "Proxmox Cloud Slave from template " + templateName,
                 remoteFS,
@@ -232,8 +231,7 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
                 clonedVmId,
                 snapshotName,
                 startVM,
-                startupWaitingPeriodSeconds,
-                RevertPolicy.NEVER
+                startupWaitingPeriodSeconds
             );
 
             // Set limited builds counter if configured
@@ -449,7 +447,10 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
                 LOGGER.log(Level.SEVERE, "Clone task failed for VM {0}: {1}", new Object[]{cloneName, errorMsg});
                 throw new RuntimeException("Clone failed for VM " + cloneName + ": " + errorMsg);
             }
-        } catch (Exception e) {
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted while waiting for the clone task of VM " + cloneName, e);
+        } catch (LoginException | IOException | RuntimeException e) {
             String errorMessage = "Clone task failed for VM " + cloneName + " (ID: " + nextVmId + "): " + e.getMessage();
             LOGGER.log(Level.SEVERE, errorMessage, e);
             throw new RuntimeException(errorMessage, e);
@@ -555,14 +556,14 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
         int totalMatchingNodes = 0;
         
         for (Node node : Jenkins.get().getNodes()) {
-            if (node instanceof VirtualMachineSlave) {
-                VirtualMachineSlave vmSlave = (VirtualMachineSlave) node;
-                if (templateName.equals(getTemplateNameFromSlave(vmSlave))) {
+            if (node instanceof ProxmoxAgent) {
+                if (templateName.equals(getTemplateNameFromSlave(node))) {
                     totalMatchingNodes++;
-                    if (vmSlave.getComputer() != null) {
-                        if (!vmSlave.getComputer().isOffline()) {
+                    hudson.model.Computer computer = node.toComputer();
+                    if (computer != null) {
+                        if (!computer.isOffline()) {
                             onlineCount++;
-                        } else if (vmSlave.getComputer().isOffline() && !(vmSlave.getComputer().getOfflineCause() instanceof hudson.slaves.OfflineCause.UserCause)) {
+                        } else if (!(computer.getOfflineCause() instanceof hudson.slaves.OfflineCause.UserCause)) {
                             tempOfflineCount++;
                         } else {
                             offlineCount++;
@@ -584,7 +585,7 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
         return activeCount;
     }
 
-    private String getTemplateNameFromSlave(VirtualMachineSlave slave) {
+    private String getTemplateNameFromSlave(Node slave) {
         String slaveName = slave.getNodeName();
         int dashIndex = slaveName.lastIndexOf('-');
         return dashIndex > 0 ? slaveName.substring(0, dashIndex) : slaveName;
@@ -691,7 +692,10 @@ public class ProxmoxCloudSlaveTemplate extends AbstractDescribableImpl<ProxmoxCl
                 LOGGER.log(Level.INFO, "Post-clone command executed successfully on VM {0}", vmName);
             }
 
-        } catch (Exception e) {
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            LOGGER.log(Level.WARNING, "Interrupted while executing the post-clone command on VM " + vmName, e);
+        } catch (LoginException | IOException | RuntimeException e) {
             LOGGER.log(Level.WARNING, "Failed to execute post-clone command on VM " + vmName + ": " + e.getMessage(), e);
         }
     }

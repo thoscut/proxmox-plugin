@@ -2,6 +2,7 @@ package org.jenkinsci.plugins.proxmox;
 
 import hudson.Extension;
 import hudson.model.Descriptor;
+import hudson.model.Node;
 import hudson.model.TaskListener;
 import hudson.slaves.ComputerLauncher;
 import hudson.slaves.JNLPLauncher;
@@ -184,11 +185,12 @@ public class QemuGuestAgentLauncher extends JNLPLauncher {
     public void launch(SlaveComputer computer, TaskListener listener) {
         listener.getLogger().println("Starting Jenkins agent via QEMU Guest Agent...");
 
-        VirtualMachineSlave slave = (VirtualMachineSlave) computer.getNode();
-        if (slave == null) {
-            LOGGER.log(Level.SEVERE, "Could not get VirtualMachineSlave for computer: " + computer.getName());
+        Node node = computer.getNode();
+        if (!(node instanceof ProxmoxAgent)) {
+            LOGGER.log(Level.SEVERE, "Could not get the Proxmox agent for computer: " + computer.getName());
             return;
         }
+        ProxmoxAgent slave = (ProxmoxAgent) node;
 
         String datacenterDescription = slave.getDatacenterDescription();
         String datacenterNode = slave.getDatacenterNode();
@@ -227,7 +229,7 @@ public class QemuGuestAgentLauncher extends JNLPLauncher {
         }
     }
 
-    private String expandAgentCommand(SlaveComputer computer, VirtualMachineSlave slave) {
+    private String expandAgentCommand(SlaveComputer computer, ProxmoxAgent slave) {
         // Use custom command or generate default
         String command = (agentCommand != null && !agentCommand.trim().isEmpty())
             ? agentCommand

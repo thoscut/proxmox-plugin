@@ -257,12 +257,10 @@ public class Datacenter extends Cloud {
         @Override
         public Node call() throws Exception {
             try {
-                Node result = template.provision(Datacenter.this, plannedNodeName);
+                ProvisionedVirtualMachineSlave result = template.provision(Datacenter.this, plannedNodeName);
 
-                // Marks the agent as owning its (cloned) virtual machine and links it to the statistics
-                if (result instanceof VirtualMachineSlave) {
-                    ((VirtualMachineSlave) result).setProvisioningId(provisioningId);
-                }
+                // Links the agent to the provisioning attempt in the cloud statistics
+                result.setProvisioningId(provisioningId);
 
                 long duration = System.currentTimeMillis() - startTime;
                 LOGGER.log(
@@ -270,9 +268,7 @@ public class Datacenter extends Cloud {
                         "Node {0} provisioned in {1}ms. Jenkins will add node and begin launch phase.",
                         new Object[] {plannedNodeName, duration});
 
-                if (result != null) {
-                    getStatistics().recordProvisioningSuccess(duration);
-                }
+                getStatistics().recordProvisioningSuccess(duration);
 
                 // Jenkins core adds the node and triggers the launch phase
                 return result;
@@ -287,8 +283,8 @@ public class Datacenter extends Cloud {
         int count = 0;
         String description = getDatacenterDescription();
         for (Node node : Jenkins.get().getNodes()) {
-            if (node instanceof VirtualMachineSlave
-                    && description.equals(((VirtualMachineSlave) node).getDatacenterDescription())) {
+            if (node instanceof ProxmoxAgent
+                    && description.equals(((ProxmoxAgent) node).getDatacenterDescription())) {
                 count++;
             }
         }
@@ -661,19 +657,18 @@ public class Datacenter extends Cloud {
      *     terminated, because that deletes the virtual machine.
      */
     public boolean canTerminate(Computer computer) {
-        if (!(computer instanceof VirtualMachineSlaveComputer)) {
+        if (!(computer instanceof ProvisionedVirtualMachineSlaveComputer)) {
             return false;
         }
-        VirtualMachineSlave vmSlave = ((VirtualMachineSlaveComputer) computer).getNode();
-        if (vmSlave == null || !vmSlave.isProvisionedByCloud()) {
-            return false;
-        }
-        return getDatacenterDescription().equals(vmSlave.getDatacenterDescription());
+        ProvisionedVirtualMachineSlave vmSlave = ((ProvisionedVirtualMachineSlaveComputer) computer).getNode();
+        return vmSlave != null && getDatacenterDescription().equals(vmSlave.getDatacenterDescription());
     }
 
     /** Stops and deletes the cloned virtual machine of a provisioned agent and removes the agent from Jenkins. */
     public void terminate(Computer computer) {
-        if (!canTerminate(computer)) {
+        ProvisionedVirtualMachineSlave vmSlave =
+                canTerminate(computer) ? ((ProvisionedVirtualMachineSlaveComputer) computer).getNode() : null;
+        if (vmSlave == null) {
             LOGGER.log(
                     Level.WARNING,
                     "Cannot terminate computer: {0} - not provisioned by this cloud instance",
@@ -681,7 +676,6 @@ public class Datacenter extends Cloud {
             return;
         }
 
-        VirtualMachineSlave vmSlave = ((VirtualMachineSlaveComputer) computer).getNode();
         Integer vmId = vmSlave.getVirtualMachineId();
         String nodeName = vmSlave.getDatacenterNode();
 
@@ -756,15 +750,15 @@ public class Datacenter extends Cloud {
     public void cleanupOrphanedNodes() {
         LOGGER.log(Level.FINE, "Starting cleanup of orphaned nodes for datacenter: {0}", getDatacenterDescription());
 
-        List<VirtualMachineSlave> nodesToRemove = new ArrayList<>();
+        List<ProvisionedVirtualMachineSlave> nodesToRemove = new ArrayList<>();
         String description = getDatacenterDescription();
 
         for (Node node : Jenkins.get().getNodes()) {
-            if (!(node instanceof VirtualMachineSlave)) {
+            if (!(node instanceof ProvisionedVirtualMachineSlave)) {
                 continue;
             }
-            VirtualMachineSlave vmSlave = (VirtualMachineSlave) node;
-            if (!vmSlave.isProvisionedByCloud() || !description.equals(vmSlave.getDatacenterDescription())) {
+            ProvisionedVirtualMachineSlave vmSlave = (ProvisionedVirtualMachineSlave) node;
+            if (!description.equals(vmSlave.getDatacenterDescription())) {
                 continue;
             }
             Computer computer = vmSlave.toComputer();
@@ -776,7 +770,7 @@ public class Datacenter extends Cloud {
             }
         }
 
-        for (VirtualMachineSlave nodeToRemove : nodesToRemove) {
+        for (ProvisionedVirtualMachineSlave nodeToRemove : nodesToRemove) {
             try {
                 LOGGER.log(Level.INFO, "Removing orphaned node: {0} (VM ID: {1})", new Object[] {
                     nodeToRemove.getNodeName(), String.valueOf(nodeToRemove.getVirtualMachineId())
@@ -824,13 +818,13 @@ public class Datacenter extends Cloud {
             Connector proxmoxApi = proxmoxInstance();
 
             // All virtual machines of this datacenter that still have a Jenkins node
-            Map<Integer, VirtualMachineSlave> jenkinsVMs = new HashMap<>();
+            Map<Integer, ProxmoxAgent> jenkinsVMs = new HashMap<>();
             String description = getDatacenterDescription();
             for (Node node : Jenkins.get().getNodes()) {
-                if (node instanceof VirtualMachineSlave) {
-                    VirtualMachineSlave vmSlave = (VirtualMachineSlave) node;
-                    if (description.equals(vmSlave.getDatacenterDescription())) {
-                        jenkinsVMs.put(vmSlave.getVirtualMachineId(), vmSlave);
+                if (node instanceof ProxmoxAgent) {
+                    ProxmoxAgent agent = (ProxmoxAgent) node;
+                    if (description.equals(agent.getDatacenterDescription())) {
+                        jenkinsVMs.put(agent.getVirtualMachineId(), agent);
                     }
                 }
             }
@@ -875,7 +869,7 @@ public class Datacenter extends Cloud {
     }
 
     private void cleanupOrphanedVMsForTemplate(
-            Connector proxmoxApi, ProxmoxCloudSlaveTemplate template, Map<Integer, VirtualMachineSlave> jenkinsVMs)
+            Connector proxmoxApi, ProxmoxCloudSlaveTemplate template, Map<Integer, ProxmoxAgent> jenkinsVMs)
             throws LoginException, IOException {
 
         String nodeName = template.getDatacenterNode();
@@ -975,7 +969,7 @@ public class Datacenter extends Cloud {
      * @return whether the agent's virtual machine is gone. Only a successful listing that lacks the
      *     virtual machine proves that; an unreachable or failing Proxmox never causes a cleanup.
      */
-    private boolean shouldCleanupNode(VirtualMachineSlave vmSlave, Computer computer) {
+    private boolean shouldCleanupNode(ProvisionedVirtualMachineSlave vmSlave, Computer computer) {
         try {
             if (hasPotentiallyResumableBuilds(computer)) {
                 return false;

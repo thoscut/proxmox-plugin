@@ -6,6 +6,7 @@ import hudson.Launcher;
 import hudson.model.AbstractBuild;
 import hudson.model.BuildListener;
 
+import java.io.IOException;
 import javax.security.auth.login.LoginException;
 
 import org.jenkinsci.plugins.proxmox.pve2api.Connector;
@@ -63,7 +64,10 @@ public class HibernateVirtualMachine extends ProxmoxBuildStep {
                     } else {
                         logInfo(listener, "VM " + vmId + " has been successfully hibernated (suspended to disk)");
                     }
-                } catch (Exception e) {
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new AbortException("VM hibernation operation was interrupted");
+                } catch (LoginException | IOException | RuntimeException e) {
                     logInfo(listener, "Could not verify VM status after hibernation, but operation completed");
                 }
             } else {

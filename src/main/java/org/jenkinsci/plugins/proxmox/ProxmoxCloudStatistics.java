@@ -176,9 +176,8 @@ public class ProxmoxCloudStatistics implements Serializable {
         int total = 0;
         
         for (Node node : Jenkins.get().getNodes()) {
-            if (node instanceof VirtualMachineSlave) {
-                VirtualMachineSlave vmSlave = (VirtualMachineSlave) node;
-                if (datacenterDescription.equals(vmSlave.getDatacenterDescription())) {
+            if (node instanceof ProxmoxAgent) {
+                if (datacenterDescription.equals(((ProxmoxAgent) node).getDatacenterDescription())) {
                     total++;
                     Computer computer = node.toComputer();
                     if (computer != null) {
